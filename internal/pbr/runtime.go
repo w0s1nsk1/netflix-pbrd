@@ -28,6 +28,7 @@ type Runtime struct {
 	desired      []string
 	learned      []string
 	applied      []string
+	appliedKnown bool
 	lastReported []string
 	updated      time.Time
 }
@@ -49,7 +50,15 @@ func newRuntime(c Config, runner CommandRunner) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("state: %v", err)
 	}
-	desired, err := ValidateNetworks(append(validatedState, c.SeedNetworks...), false, maxNetworks(c))
+	learnedState, err := LoadState(learnedStateFile(c.StateFile))
+	if err != nil {
+		return nil, err
+	}
+	learned, err := ValidateNetworks(learnedState, true, maxNetworks(c))
+	if err != nil {
+		return nil, fmt.Errorf("learned state: %v", err)
+	}
+	desired, err := ValidateNetworks(Merge(validatedState, learned, c.SeedNetworks), false, maxNetworks(c))
 	if err != nil {
 		return nil, fmt.Errorf("state: %v", err)
 	}
@@ -59,6 +68,7 @@ func newRuntime(c Config, runner CommandRunner) (*Runtime, error) {
 		runner:   runner,
 		client:   &http.Client{Timeout: 15 * time.Second},
 		desired:  desired,
+		learned:  learned,
 		updated:  time.Now().UTC(),
 	}, nil
 }
@@ -149,6 +159,13 @@ func (r *Runtime) learn(ctx context.Context, networks []string) error {
 	if err != nil {
 		return err
 	}
+	if !Equal(previousLearned, nextLearned) {
+		// Persist discoveries before applying or reporting them, so either operation
+		// can be retried after a restart.
+		if err := SaveState(learnedStateFile(r.config.StateFile), nextLearned); err != nil {
+			return err
+		}
+	}
 	if !Equal(previous, next) {
 		if err := SaveState(r.config.StateFile, next); err != nil {
 			return err
@@ -176,9 +193,10 @@ func (r *Runtime) reconcileLocked(ctx context.Context) error {
 	desired := append([]string(nil), r.desired...)
 	learned := append([]string(nil), r.learned...)
 	applied := append([]string(nil), r.applied...)
+	appliedKnown := r.appliedKnown
 	lastReported := append([]string(nil), r.lastReported...)
 	r.mu.RUnlock()
-	if !Equal(desired, applied) {
+	if !appliedKnown || !Equal(desired, applied) {
 		for _, apply := range r.config.Apply {
 			if err := applyNetworks(r.runner, apply, desired); err != nil {
 				return fmt.Errorf("apply %s: %v", apply.Driver, err)
@@ -186,6 +204,7 @@ func (r *Runtime) reconcileLocked(ctx context.Context) error {
 		}
 		r.mu.Lock()
 		r.applied = append([]string(nil), desired...)
+		r.appliedKnown = true
 		r.mu.Unlock()
 		log.Printf("applied %d networks", len(desired))
 	}
@@ -199,6 +218,10 @@ func (r *Runtime) reconcileLocked(ctx context.Context) error {
 		r.mu.Unlock()
 	}
 	return nil
+}
+
+func learnedStateFile(stateFile string) string {
+	return stateFile + ".learned"
 }
 
 func maxNetworks(c Config) int {

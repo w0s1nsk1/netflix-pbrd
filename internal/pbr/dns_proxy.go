@@ -62,6 +62,10 @@ func (l *dnsLearner) ServeDNS(w dns.ResponseWriter, request *dns.Msg) {
 	if len(networks) > 0 && l.learn != nil {
 		if err := l.learn(context.Background(), networks); err != nil {
 			log.Printf("dns learn: %v", err)
+			failure := new(dns.Msg)
+			failure.SetRcode(request, dns.RcodeServerFailure)
+			_ = w.WriteMsg(failure)
+			return
 		}
 	}
 	if err := w.WriteMsg(response); err != nil {
@@ -249,6 +253,10 @@ func startDNSProxy(ctx context.Context, config DNSProxyConfig, learn func(contex
 		_ = udpServer.Shutdown()
 		_ = tcpServer.Shutdown()
 	}()
-	log.Printf("dns learning proxy listening on %s via %s", config.Listen, config.Upstream)
+	upstream := config.Upstream
+	if upstream == "" {
+		upstream = config.DoHURL
+	}
+	log.Printf("dns learning proxy listening on %s via %s", config.Listen, upstream)
 	return nil
 }

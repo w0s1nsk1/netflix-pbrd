@@ -8,6 +8,10 @@
     "report_token": "REPLACE_WITH_A_DIFFERENT_LONG_REPORT_TOKEN",
     "allow_insecure_http": true
   },
+  "dns_proxy": {
+    "listen": "192.168.8.2:1053",
+    "upstream": "10.8.0.1:53"
+  },
   "apply": [{
     "driver": "linux-edge",
     "interface": "wg0",
@@ -15,6 +19,7 @@
     "base_allowed": ["10.8.0.0/24", "192.168.1.0/24"],
     "next_hop": "10.8.0.108",
     "source_net": "192.168.8.0/24",
+    "input_interface": "br+",
     "table": "202",
     "rule_priority": "12020",
     "mark": "0x20000000",

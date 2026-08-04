@@ -8,10 +8,6 @@
     "report_token": "REPLACE_WITH_A_DIFFERENT_LONG_REPORT_TOKEN",
     "allow_insecure_http": true
   },
-  "dns_proxy": {
-    "listen": "10.8.0.1:1053",
-    "upstream": "127.0.0.1:53"
-  },
   "apply": [{
     "driver": "wg-route",
     "interface": "wg0",

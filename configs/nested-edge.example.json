@@ -18,6 +18,7 @@
     "peer": "RELAY_WIREGUARD_PUBLIC_KEY",
     "base_allowed": ["0.0.0.0/0"],
     "source_net": "192.168.8.0/24",
+    "input_interface": "br+",
     "table": "202",
     "rule_priority": "12020",
     "mark": "0x20000000",

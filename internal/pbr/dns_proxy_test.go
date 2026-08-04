@@ -124,6 +124,44 @@ func TestDNSProxyForwardsUDPAndTCPBeforeLearningReturns(t *testing.T) {
 	}
 }
 
+func TestDNSProxyReturnsSERVFAILWhenTrustedAddressCannotBeApplied(t *testing.T) {
+	upstream, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("network namespace does not allow listeners: %v", err)
+	}
+	server := &dns.Server{PacketConn: upstream, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, request *dns.Msg) {
+		response := new(dns.Msg)
+		response.SetReply(request)
+		response.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: request.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60}, A: net.ParseIP("45.57.22.134")}}
+		_ = w.WriteMsg(response)
+	})}
+	go server.ActivateAndServe()
+	defer server.Shutdown()
+
+	proxyProbe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyAddress := proxyProbe.Addr().String()
+	proxyProbe.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := startDNSProxy(ctx, DNSProxyConfig{Listen: proxyAddress, Upstream: upstream.LocalAddr().String()}, func(context.Context, []string) error {
+		return context.DeadlineExceeded
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request := new(dns.Msg)
+	request.SetQuestion("android.prod.cloud.netflix.com.", dns.TypeA)
+	response, _, err := (&dns.Client{Timeout: time.Second}).Exchange(request, proxyAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Rcode != dns.RcodeServerFailure || len(response.Answer) != 0 {
+		t.Fatalf("rcode=%s answers=%d", dns.RcodeToString[response.Rcode], len(response.Answer))
+	}
+}
+
 func TestAddClientSubnetPreservesOtherEDNSOptionsAndReplacesECS(t *testing.T) {
 	message := new(dns.Msg)
 	message.SetQuestion("android.prod.cloud.netflix.com.", dns.TypeA)

@@ -44,6 +44,29 @@ func TestReconcileRetriesFailedApplyFromDurableState(t *testing.T) {
 	}
 }
 
+func TestReconcileAppliesEmptyStateOnFirstRun(t *testing.T) {
+	runner := newFakeRunner()
+	runner.failures[commandKey("nft", "list", "table", "inet", "netflix_exit")] = 1
+	runtime, err := newRuntime(Config{
+		Role:      "controller",
+		StateFile: filepath.Join(t.TempDir(), "state"),
+		API:       APIConfig{Token: testReadToken, ReportToken: testReportToken},
+		Apply:     []ApplyConfig{{Driver: "nft-exit", SourceNet: "10.66.0.0/24", WANInterface: "eth0"}},
+	}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !runtime.appliedKnown {
+		t.Fatal("empty state was not marked applied")
+	}
+	if input := runner.inputs(); !strings.Contains(input, "ip saddr 10.66.0.0/24 drop") {
+		t.Fatalf("fail-closed table not installed:\n%s", input)
+	}
+}
+
 func TestReconcileRetriesFailedReportWithoutReapplying(t *testing.T) {
 	var posts int32
 	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -82,6 +105,42 @@ func TestReconcileRetriesFailedReportWithoutReapplying(t *testing.T) {
 	}
 	if got := strings.Count(runner.commandLines(), "wg set wg0 peer peer allowed-ips 45.57.22.134/32"); got != 1 {
 		t.Fatalf("apply calls=%d\n%s", got, runner.commandLines())
+	}
+}
+
+func TestLearnedStateSurvivesRestartAfterFailedReport(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	c := Config{Role: "agent", StateFile: state, API: APIConfig{SourceURL: "http://controller.test/v1/networks", Token: testReadToken, ReportToken: testReportToken}}
+	failing := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusInternalServerError, Status: "500 Internal Server Error", Body: ioutil.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+	})
+	first, err := newRuntime(c, newFakeRunner())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.client = &http.Client{Transport: failing}
+	if err := first.learn(context.Background(), []string{"45.57.22.134"}); err == nil {
+		t.Fatal("expected report failure")
+	}
+
+	var reported []string
+	second, err := newRuntime(c, newFakeRunner())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var payload APIResponse
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		reported = payload.Networks
+		return &http.Response{StatusCode: http.StatusNoContent, Status: "204 No Content", Body: ioutil.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+	})}
+	if err := second.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !Equal(reported, []string{"45.57.22.134/32"}) {
+		t.Fatalf("reported=%v", reported)
 	}
 }
 

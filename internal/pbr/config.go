@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -50,6 +51,7 @@ type DNSProxyConfig struct {
 type ApplyConfig struct {
 	Driver          string   `json:"driver"`
 	Interface       string   `json:"interface"`
+	InputInterface  string   `json:"input_interface"`
 	Peer            string   `json:"peer"`
 	BaseAllowed     []string `json:"base_allowed"`
 	NextHop         string   `json:"next_hop"`
@@ -142,6 +144,9 @@ func LoadConfig(path string) (Config, error) {
 		if apply.Interface != "" && !interfacePattern.MatchString(apply.Interface) {
 			return c, fmt.Errorf("invalid interface %q", apply.Interface)
 		}
+		if apply.InputInterface != "" && !validInputInterface(apply.InputInterface) {
+			return c, fmt.Errorf("invalid input_interface %q", apply.InputInterface)
+		}
 		if apply.WANInterface != "" && !interfacePattern.MatchString(apply.WANInterface) {
 			return c, fmt.Errorf("invalid wan_interface %q", apply.WANInterface)
 		}
@@ -196,6 +201,11 @@ func LoadConfig(path string) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+func validInputInterface(value string) bool {
+	value = strings.TrimSuffix(value, "+")
+	return interfacePattern.MatchString(value)
 }
 
 func validHostPort(value string) bool {

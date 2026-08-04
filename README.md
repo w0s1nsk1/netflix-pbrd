@@ -43,11 +43,11 @@ starting point for WireGuard inside WireGuard.
 LAN device -> edge router -> WireGuard controller -> relay router -> Internet
 ```
 
-The controller proxies DNS, learns trusted Netflix answers and CNAME targets,
-and publishes a monotonic network set. There is no endpoint bootstrap list.
-The edge installs destination routes and packet marks. The controller routes
-those destinations to the relay peer, and the OpenWrt relay applies its WAN PBR
-and firewall policy.
+The edge proxies DNS, learns trusted Netflix answers and CNAME targets, and
+synchronously reports each learned address before returning it to the client.
+There is no endpoint bootstrap list. The edge installs destination routes and
+packet marks. The controller routes reported destinations to the relay peer,
+and the OpenWrt relay applies its WAN PBR and firewall policy.
 
 ### Client and public exit server
 
@@ -115,13 +115,12 @@ Validate a configuration without changing networking state:
 netflix-pbrd -config /etc/netflix-pbrd.json -check
 ```
 
-The learning proxy requires both UDP and TCP DNS traffic from the application
-devices to reach `dns_proxy.listen`. Forward those requests to the proxy port;
-the proxy sends them to `dns_proxy.upstream` and returns the original response.
-For example, a gateway can redirect selected source devices to
-`10.8.0.1:1053`, while the controller forwards requests to its existing local
-resolver at `127.0.0.1:53`. Do not redirect the proxy's own upstream traffic
-back to the learning port.
+The learning proxy must run on the edge that controls the client's first
+route. Both UDP and TCP DNS traffic from application devices must reach
+`dns_proxy.listen`. The proxy returns a trusted Netflix answer only after its
+addresses have been applied and reported successfully; otherwise it returns
+SERVFAIL. Do not redirect the proxy's own upstream traffic back to the learning
+port.
 
 As an alternative to `upstream`, configure `doh_url`. The proxy then sends
 DNS-message POST requests with the original client in `X-Real-IP`. Add only the
@@ -150,7 +149,9 @@ WireGuard interface setup. Copy `netflix-pbr-relay.conf.example` to
 `/opt/etc/netflix-pbr-relay.conf` and replace every placeholder. DNS redirection
 is deployment-specific and intentionally not managed by these scripts.
 
-`linux-edge.next_hop` is optional. Omit it for a point-to-point WireGuard
+`linux-edge.input_interface` selects the incoming LAN interface and supports an
+iptables `+` suffix; it defaults to `br+`. `linux-edge.next_hop` is optional.
+Omit it for a point-to-point WireGuard
 interface so routes are installed directly with `dev <interface>`. The driver
 installs only a default route in its dedicated policy table; destination
 selection remains scoped to `source_net` by the mangle mark and `ip rule`.
@@ -172,7 +173,9 @@ into an unrestricted VPN gateway.
 
 ## Operational notes
 
-State files are intentionally monotonic. Remove a controller state file only
+State files are intentionally monotonic. Locally learned hosts are stored in a
+separate `<state_file>.learned` file so failed reports survive restarts. Remove
+a controller state file only
 when you explicitly want to forget historical destinations. The controller
 then rebuilds the set from DNS answers actually requested by Netflix
 applications. After a successful fetch, agents replace their startup state

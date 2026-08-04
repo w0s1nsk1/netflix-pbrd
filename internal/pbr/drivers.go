@@ -27,25 +27,22 @@ func applyNFTExit(runner CommandRunner, c ApplyConfig, nets []string) error {
 		c.Chain = "netflix_exit"
 	}
 	setName := "destinations"
-	if !succeeds(runner, "nft", "list", "table", "inet", c.Chain) {
-		var initial strings.Builder
-		initial.WriteString("add table inet " + c.Chain + "\n")
-		initial.WriteString("add set inet " + c.Chain + " " + setName + " { type ipv4_addr; flags interval; }\n")
-		initial.WriteString("add chain inet " + c.Chain + " forward { type filter hook forward priority -10; policy accept; }\n")
-		initial.WriteString("add rule inet " + c.Chain + " forward ip saddr " + c.SourceNet + " ip daddr @" + setName + " accept\n")
-		initial.WriteString("add rule inet " + c.Chain + " forward ip saddr " + c.SourceNet + " drop\n")
-		initial.WriteString("add chain inet " + c.Chain + " postrouting { type nat hook postrouting priority 100; policy accept; }\n")
-		initial.WriteString("add rule inet " + c.Chain + " postrouting ip saddr " + c.SourceNet + " ip daddr @" + setName + " oifname \"" + c.WANInterface + "\" masquerade\n")
-		if err := runner.RunInput(initial.String(), "nft", "-f", "-"); err != nil {
-			return err
-		}
+	exists := succeeds(runner, "nft", "list", "table", "inet", c.Chain)
+	var transaction strings.Builder
+	if exists {
+		transaction.WriteString("delete table inet " + c.Chain + "\n")
 	}
-	var update strings.Builder
-	update.WriteString("flush set inet " + c.Chain + " " + setName + "\n")
+	transaction.WriteString("add table inet " + c.Chain + "\n")
+	transaction.WriteString("add set inet " + c.Chain + " " + setName + " { type ipv4_addr; flags interval; }\n")
 	if len(nets) > 0 {
-		update.WriteString("add element inet " + c.Chain + " " + setName + " { " + strings.Join(nets, ", ") + " }\n")
+		transaction.WriteString("add element inet " + c.Chain + " " + setName + " { " + strings.Join(nets, ", ") + " }\n")
 	}
-	return runner.RunInput(update.String(), "nft", "-f", "-")
+	transaction.WriteString("add chain inet " + c.Chain + " forward { type filter hook forward priority -10; policy accept; }\n")
+	transaction.WriteString("add rule inet " + c.Chain + " forward ip saddr " + c.SourceNet + " ip daddr @" + setName + " accept\n")
+	transaction.WriteString("add rule inet " + c.Chain + " forward ip saddr " + c.SourceNet + " drop\n")
+	transaction.WriteString("add chain inet " + c.Chain + " postrouting { type nat hook postrouting priority 100; policy accept; }\n")
+	transaction.WriteString("add rule inet " + c.Chain + " postrouting ip saddr " + c.SourceNet + " ip daddr @" + setName + " oifname \"" + c.WANInterface + "\" masquerade\n")
+	return runner.RunInput(transaction.String(), "nft", "-f", "-")
 }
 
 func succeeds(runner CommandRunner, name string, args ...string) bool {
@@ -137,7 +134,7 @@ func applyEdge(runner CommandRunner, c ApplyConfig, nets []string) error {
 	}
 	routeTarget := "dev " + c.Interface
 	if c.NextHop != "" {
-		routeTarget = "via " + c.NextHop + " " + routeTarget
+		routeTarget = "via " + c.NextHop + " " + routeTarget + " onlink"
 	}
 	if err := routeBatch(runner, []string{"route replace default " + routeTarget + " table " + c.Table}); err != nil {
 		return err
@@ -151,13 +148,13 @@ func applyEdge(runner CommandRunner, c ApplyConfig, nets []string) error {
 	var restore strings.Builder
 	restore.WriteString("*mangle\n-F " + c.Chain + "\n")
 	for _, network := range nets {
-		restore.WriteString("-A " + c.Chain + " -d " + network + " -j MARK --set-mark " + c.Mark + "\n")
+		restore.WriteString("-A " + c.Chain + " -d " + network + " -j MARK --set-xmark " + c.Mark + "/" + c.Mask + "\n")
 	}
 	restore.WriteString("COMMIT\n")
 	if err := restoreIPTables(runner, restore.String()); err != nil {
 		return err
 	}
-	hook := []string{"-t", "mangle", "-C", "PREROUTING", "-i", "br+", "-s", c.SourceNet, "-j", c.Chain}
+	hook := []string{"-t", "mangle", "-C", "PREROUTING", "-i", c.InputInterface, "-s", c.SourceNet, "-j", c.Chain}
 	if succeeds(runner, "iptables", hook...) {
 		return nil
 	}
@@ -180,6 +177,9 @@ func withEdgeDefaults(c *ApplyConfig) {
 	}
 	if c.RulePriority == "" {
 		c.RulePriority = "12020"
+	}
+	if c.InputInterface == "" {
+		c.InputInterface = "br+"
 	}
 }
 

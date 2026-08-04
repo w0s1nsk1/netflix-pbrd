@@ -58,6 +58,21 @@ func TestLinuxEdgeUsesDedicatedTableOnly(t *testing.T) {
 	}
 }
 
+func TestLinuxEdgeUsesMaskedMarkConfiguredInputAndOnlinkNextHop(t *testing.T) {
+	runner := newFakeRunner()
+	runner.outputs[commandKey("ip", "rule", "show")] = ""
+	c := ApplyConfig{Driver: "linux-edge", Interface: "wg-relay", InputInterface: "lan0", Peer: "peer", NextHop: "10.8.0.108", SourceNet: "192.168.8.0/24"}
+	if err := applyEdge(runner, c, []string{"45.57.22.134/32"}); err != nil {
+		t.Fatal(err)
+	}
+	if input := runner.inputs(); !strings.Contains(input, "route replace default via 10.8.0.108 dev wg-relay onlink table 202") || !strings.Contains(input, "MARK --set-xmark 0x20000000/0xff000000") {
+		t.Fatalf("unexpected generated input:\n%s", input)
+	}
+	if commands := runner.commandLines(); !strings.Contains(commands, "-i lan0 -s 192.168.8.0/24") {
+		t.Fatalf("configured input interface not used:\n%s", commands)
+	}
+}
+
 func TestLinuxEdgeReturnsCriticalHookFailure(t *testing.T) {
 	runner := newFakeRunner()
 	runner.outputs[commandKey("ip", "rule", "show")] = ""
@@ -136,11 +151,22 @@ func TestNFTExitCreatesFailClosedTableAndAtomicallyUpdatesSet(t *testing.T) {
 		"ip saddr 192.168.8.0/24 ip daddr @destinations accept",
 		"ip saddr 192.168.8.0/24 drop",
 		"oifname \"wan\" masquerade",
-		"flush set inet netflix_exit destinations",
 		"add element inet netflix_exit destinations { 45.57.22.134/32 }",
 	} {
 		if !strings.Contains(input, required) {
 			t.Fatalf("missing %q in:\n%s", required, input)
 		}
+	}
+}
+
+func TestNFTExitRebuildsRulesWhenConfigurationChanges(t *testing.T) {
+	runner := newFakeRunner()
+	c := ApplyConfig{Driver: "nft-exit", SourceNet: "10.66.0.0/24", WANInterface: "eth0", Chain: "netflix_exit"}
+	if err := applyNFTExit(runner, c, nil); err != nil {
+		t.Fatal(err)
+	}
+	input := runner.inputs()
+	if !strings.Contains(input, "delete table inet netflix_exit") || !strings.Contains(input, "ip saddr 10.66.0.0/24 drop") || !strings.Contains(input, "oifname \"eth0\"") {
+		t.Fatalf("table was not fully rebuilt:\n%s", input)
 	}
 }
