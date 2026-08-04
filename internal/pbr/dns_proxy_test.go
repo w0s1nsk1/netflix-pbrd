@@ -20,6 +20,12 @@ func TestDNSProxyForwardsUDPAndTCPBeforeLearningReturns(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := dns.HandlerFunc(func(w dns.ResponseWriter, request *dns.Msg) {
+		opt := request.IsEdns0()
+		if opt == nil || len(opt.Option) != 1 {
+			t.Errorf("missing ECS option: %#v", opt)
+		} else if subnet, ok := opt.Option[0].(*dns.EDNS0_SUBNET); !ok || subnet.Address.String() != "127.0.0.1" || subnet.SourceNetmask != 32 {
+			t.Errorf("invalid ECS option: %#v", opt.Option[0])
+		}
 		response := new(dns.Msg)
 		response.SetReply(request)
 		response.Answer = []dns.RR{&dns.A{
@@ -69,6 +75,25 @@ func TestDNSProxyForwardsUDPAndTCPBeforeLearningReturns(t *testing.T) {
 		default:
 			t.Fatalf("%s response returned before learning callback", network)
 		}
+	}
+}
+
+func TestAddClientSubnetPreservesOtherEDNSOptionsAndReplacesECS(t *testing.T) {
+	message := new(dns.Msg)
+	message.SetQuestion("android.prod.cloud.netflix.com.", dns.TypeA)
+	opt := &dns.OPT{Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeOPT, Class: 4096}}
+	opt.Option = []dns.EDNS0{
+		&dns.EDNS0_NSID{Code: dns.EDNS0NSID, Nsid: "test"},
+		&dns.EDNS0_SUBNET{Code: dns.EDNS0SUBNET, Family: 1, SourceNetmask: 24, Address: net.ParseIP("192.0.2.0")},
+	}
+	message.Extra = append(message.Extra, opt)
+	addClientSubnet(message, &net.UDPAddr{IP: net.ParseIP("192.168.8.230"), Port: 53000})
+	if len(opt.Option) != 2 {
+		t.Fatalf("options=%#v", opt.Option)
+	}
+	subnet, ok := opt.Option[1].(*dns.EDNS0_SUBNET)
+	if !ok || subnet.Address.String() != "192.168.8.230" || subnet.SourceNetmask != 32 {
+		t.Fatalf("subnet=%#v", opt.Option[1])
 	}
 }
 

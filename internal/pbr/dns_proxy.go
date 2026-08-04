@@ -46,11 +46,13 @@ func newDNSLearner(config DNSProxyConfig, learn func(context.Context, []string) 
 }
 
 func (l *dnsLearner) ServeDNS(w dns.ResponseWriter, request *dns.Msg) {
+	upstreamRequest := request.Copy()
+	addClientSubnet(upstreamRequest, w.RemoteAddr())
 	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second}
-	response, _, err := client.Exchange(request, l.config.Upstream)
+	response, _, err := client.Exchange(upstreamRequest, l.config.Upstream)
 	if err == nil && response.Truncated {
 		client.Net = "tcp"
-		response, _, err = client.Exchange(request, l.config.Upstream)
+		response, _, err = client.Exchange(upstreamRequest, l.config.Upstream)
 	}
 	if err != nil {
 		failure := new(dns.Msg)
@@ -68,6 +70,37 @@ func (l *dnsLearner) ServeDNS(w dns.ResponseWriter, request *dns.Msg) {
 	if err := w.WriteMsg(response); err != nil {
 		log.Printf("dns proxy response: %v", err)
 	}
+}
+
+func addClientSubnet(message *dns.Msg, remote net.Addr) {
+	if remote == nil {
+		return
+	}
+	host, _, err := net.SplitHostPort(remote.String())
+	if err != nil {
+		return
+	}
+	ip := net.ParseIP(host).To4()
+	if ip == nil {
+		return
+	}
+	opt := message.IsEdns0()
+	if opt == nil {
+		opt = &dns.OPT{Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeOPT, Class: 1232}}
+		message.Extra = append(message.Extra, opt)
+	}
+	options := opt.Option[:0]
+	for _, option := range opt.Option {
+		if option.Option() != dns.EDNS0SUBNET {
+			options = append(options, option)
+		}
+	}
+	opt.Option = append(options, &dns.EDNS0_SUBNET{
+		Code:          dns.EDNS0SUBNET,
+		Family:        1,
+		SourceNetmask: 32,
+		Address:       ip,
+	})
 }
 
 func (l *dnsLearner) inspect(message *dns.Msg) []string {
