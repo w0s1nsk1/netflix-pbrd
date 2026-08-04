@@ -1,0 +1,27 @@
+{
+  "role": "controller",
+  "interval": "15s",
+  "state_file": "/var/lib/netflix-pbrd/networks.state",
+  "api": {
+    "listen": "10.8.0.1:18080",
+    "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN",
+    "allow_insecure_http": true
+  },
+  "discovery": {
+    "dns_server": "10.8.0.1:53",
+    "domains": [
+      "api-global.netflix.com",
+      "nrdp52-appboot.netflix.com",
+      "cast.netflix.com",
+      "cast-uiboot.prod.cloud.netflix.com",
+      "ios.ngp.prod.cloud.netflix.com",
+      "ios26.appboot.netflix.com"
+    ]
+  },
+  "apply": [{
+    "driver": "wg-route",
+    "interface": "wg0",
+    "peer": "RELAY_WIREGUARD_PUBLIC_KEY",
+    "base_allowed": ["10.8.0.108/32", "192.168.1.0/24"]
+  }]
+}

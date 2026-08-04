@@ -1,0 +1,16 @@
+[Unit]
+Description=Netflix policy-based routing controller
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/netflix-pbrd -config /etc/netflix-pbrd.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

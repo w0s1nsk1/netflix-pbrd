@@ -1,0 +1,23 @@
+{
+  "role": "agent",
+  "interval": "15s",
+  "state_file": "/opt/var/lib/netflix-pbrd/networks.state",
+  "api": {
+    "source_url": "http://10.8.0.1:18080/v1/networks",
+    "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN",
+    "allow_insecure_http": true
+  },
+  "apply": [{
+    "driver": "linux-edge",
+    "interface": "wg0",
+    "peer": "CONTROLLER_WIREGUARD_PUBLIC_KEY",
+    "base_allowed": ["10.8.0.0/24", "192.168.1.0/24"],
+    "next_hop": "10.8.0.108",
+    "source_net": "192.168.8.0/24",
+    "table": "202",
+    "rule_priority": "12020",
+    "mark": "0x20000000",
+    "mask": "0xff000000",
+    "chain": "NETFLIX_PBR"
+  }]
+}

@@ -1,0 +1,44 @@
+#!/bin/sh
+
+WG=/opt/bin/wg
+IFACE=wg-relay
+KEY=/opt/etc/wireguard/netflix-relay.key
+PEER_PUBLIC_KEY=REPLACE_WITH_RELAY_PUBLIC_KEY
+ENDPOINT=10.8.0.108:51822
+OUTER_PEER_PUBLIC_KEY=REPLACE_WITH_OUTER_SERVER_PUBLIC_KEY
+
+reset_outer_routes() {
+	"$WG" set wg0 peer "$OUTER_PEER_PUBLIC_KEY" allowed-ips 10.8.0.0/24,192.168.1.0/24
+	ip route flush dev wg0
+	ip route replace 10.8.0.0/24 dev wg0
+	ip route replace 192.168.1.0/24 dev wg0
+}
+
+start() {
+	reset_outer_routes
+	ip link show "$IFACE" >/dev/null 2>&1 || ip link add "$IFACE" type wireguard
+	ip address replace 172.31.255.2/30 dev "$IFACE"
+	"$WG" set "$IFACE" private-key "$KEY" peer "$PEER_PUBLIC_KEY" \
+		endpoint "$ENDPOINT" allowed-ips 0.0.0.0/0 persistent-keepalive 25
+	ip link set mtu 1340 dev "$IFACE"
+	ip link set up dev "$IFACE"
+	iptables -C INPUT_SERVICE_ACL -i "$IFACE" -s 172.31.255.1 -j ACCEPT 2>/dev/null || \
+		iptables -I INPUT_SERVICE_ACL 2 -i "$IFACE" -s 172.31.255.1 -j ACCEPT
+}
+
+stop() {
+	while iptables -C INPUT_SERVICE_ACL -i "$IFACE" -s 172.31.255.1 -j ACCEPT 2>/dev/null; do
+		iptables -D INPUT_SERVICE_ACL -i "$IFACE" -s 172.31.255.1 -j ACCEPT
+	done
+	ip link del "$IFACE" >/dev/null 2>&1 || true
+}
+
+case "$1" in
+	start|restart|reconfigure)
+		stop
+		start
+		;;
+	stop|kill)
+		stop
+		;;
+esac

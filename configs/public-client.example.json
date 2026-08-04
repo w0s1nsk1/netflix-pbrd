@@ -1,0 +1,17 @@
+{
+  "role": "agent",
+  "interval": "15s",
+  "state_file": "/var/lib/netflix-pbrd/networks.state",
+  "api": {
+    "source_url": "https://vpn.example.com:18443/v1/networks",
+    "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN"
+  },
+  "apply": [{
+    "driver": "linux-edge",
+    "interface": "wg0",
+    "peer": "PUBLIC_SERVER_WIREGUARD_KEY",
+    "base_allowed": ["10.66.0.0/24"],
+    "next_hop": "10.66.0.1",
+    "source_net": "192.168.50.0/24"
+  }]
+}
