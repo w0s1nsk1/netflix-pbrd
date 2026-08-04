@@ -18,6 +18,8 @@
       "nrdp52-appboot.netflix.com",
       "ios.ngp.prod.cloud.netflix.com",
       "ios26.appboot.netflix.com",
+      "android14-tman.prod.cloud.netflix.com",
+      "android.prod.cloud.netflix.com",
       "pushy-prod-nlb4-shard2-9274479dbff3f3e0.elb.us-east-1.amazonaws.com"
     ]
   }

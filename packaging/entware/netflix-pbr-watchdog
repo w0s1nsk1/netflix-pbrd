@@ -19,4 +19,10 @@ fi
 
 if ! /opt/bin/busybox pidof netflix-pbrd >/dev/null 2>&1; then
 	/opt/etc/init.d/S48netflix-pbrd start
+elif ! ip route show table 202 | grep -q '^default dev wg-relay'; then
+	for pid in $(/opt/bin/busybox pidof netflix-pbrd); do
+		kill "$pid"
+	done
+	sleep 1
+	/opt/etc/init.d/S48netflix-pbrd start
 fi

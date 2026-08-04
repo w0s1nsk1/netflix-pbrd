@@ -10,7 +10,7 @@
   },
   "discovery": {
     "dns_server": "1.1.1.1:53",
-    "domains": ["api-global.netflix.com", "nrdp52-appboot.netflix.com", "cast.netflix.com"]
+    "domains": ["api-global.netflix.com", "nrdp52-appboot.netflix.com", "cast.netflix.com", "android14-tman.prod.cloud.netflix.com", "android.prod.cloud.netflix.com"]
   },
   "apply": [{
     "driver": "linux-exit",
