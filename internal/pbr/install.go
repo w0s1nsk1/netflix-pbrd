@@ -17,11 +17,11 @@ type InstallLayout struct {
 }
 
 func DetectInstallLayout() InstallLayout {
-	if pathExists("/opt/etc/init.d") {
-		return InstallLayout{Platform: "entware", Binary: "/opt/sbin/netflix-pbrd", Config: "/opt/etc/netflix-pbrd.json", Service: "/opt/etc/init.d/S48netflix-pbrd"}
-	}
 	if pathExists("/etc/openwrt_release") {
 		return InstallLayout{Platform: "openwrt", Binary: "/usr/sbin/netflix-pbrd", Config: "/etc/netflix-pbrd.json", Service: "/etc/init.d/netflix-pbrd"}
+	}
+	if pathExists("/opt/etc/init.d") {
+		return InstallLayout{Platform: "entware", Binary: "/opt/sbin/netflix-pbrd", Config: "/opt/etc/netflix-pbrd.json", Service: "/opt/etc/init.d/S48netflix-pbrd"}
 	}
 	return InstallLayout{Platform: "systemd", Binary: "/usr/local/sbin/netflix-pbrd", Config: "/etc/netflix-pbrd.json", Service: "/etc/systemd/system/netflix-pbrd.service"}
 }
