@@ -113,6 +113,18 @@ func TestEnsureIPRuleRejectsConflictingOwner(t *testing.T) {
 	}
 }
 
+func TestEnsureIPRuleRejectsAdditionalJSONSelector(t *testing.T) {
+	runner := newFakeRunner()
+	runner.outputs[commandKey("ip", "-j", "rule", "show")] = `[{"priority":12020,"src":"192.0.2.0/24","fwmark":"0x20000000","fwmask":"0xff000000","table":"202"}]`
+	err := ensureIPRule(runner, "12020", "0x20000000", "0xff000000", "202")
+	if err == nil || !strings.Contains(err.Error(), "owned by another rule") {
+		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(runner.commandLines(), "ip rule del") {
+		t.Fatal("rule with additional selector was deleted")
+	}
+}
+
 func TestEnsureIPRuleRemovesOnlyExactDuplicates(t *testing.T) {
 	runner := newFakeRunner()
 	runner.outputs[commandKey("ip", "-j", "rule", "show")] = `[{"priority":12020,"fwmark":"0x20000000","fwmask":"0xff000000","table":"202"},{"priority":12020,"fwmark":"0x20000000","fwmask":"0xff000000","table":"202"}]`
@@ -152,6 +164,52 @@ func TestWGRouteAndOpenWrtDriversGenerateCommands(t *testing.T) {
 	}
 	if !strings.Contains(openwrt.commandLines(), "uci set pbr.@policy[4].dest_addr=45.57.22.134/32") {
 		t.Fatal(openwrt.commandLines())
+	}
+}
+
+func TestPeriodicOpenWrtCheckDoesNotRewriteHealthyConfiguration(t *testing.T) {
+	runner := newFakeRunner()
+	c := ApplyConfig{Driver: "openwrt-pbr", PBRSection: "@policy[4]", FirewallSection: "@rule[13]"}
+	networks := []string{"45.57.22.134/32", "54.84.54.3/32"}
+	runner.outputs[commandKey("uci", "-q", "get", "pbr.@policy[4].dest_addr")] = "45.57.22.134/32 54.84.54.3/32\n"
+	runner.outputs[commandKey("uci", "-q", "get", "firewall.@rule[13].dest_ip")] = "54.84.54.3/32 45.57.22.134/32\n"
+	if err := reapplyNetworks(runner, c, networks); err != nil {
+		t.Fatal(err)
+	}
+	commands := runner.commandLines()
+	for _, forbidden := range []string{"uci set", "uci commit", "/etc/init.d/firewall reload", "/etc/init.d/pbr reload"} {
+		if strings.Contains(commands, forbidden) {
+			t.Fatalf("healthy OpenWrt was modified by %q:\n%s", forbidden, commands)
+		}
+	}
+}
+
+func TestPeriodicOpenWrtRestoresOnlyFailedRuntimeService(t *testing.T) {
+	runner := newFakeRunner()
+	c := ApplyConfig{Driver: "openwrt-pbr", PBRSection: "policy", FirewallSection: "rule"}
+	runner.outputs[commandKey("uci", "-q", "get", "pbr.policy.dest_addr")] = "45.57.22.134/32\n"
+	runner.outputs[commandKey("uci", "-q", "get", "firewall.rule.dest_ip")] = "45.57.22.134/32\n"
+	runner.failures[commandKey("/etc/init.d/pbr", "status")] = 1
+	if err := reapplyNetworks(runner, c, []string{"45.57.22.134/32"}); err != nil {
+		t.Fatal(err)
+	}
+	commands := runner.commandLines()
+	if !strings.Contains(commands, "/etc/init.d/pbr reload") || strings.Contains(commands, "uci commit") || strings.Contains(commands, "/etc/init.d/firewall reload") {
+		t.Fatalf("unexpected runtime repair:\n%s", commands)
+	}
+}
+
+func TestPeriodicOpenWrtReappliesDriftedConfiguration(t *testing.T) {
+	runner := newFakeRunner()
+	c := ApplyConfig{Driver: "openwrt-pbr", PBRSection: "policy", FirewallSection: "rule"}
+	runner.outputs[commandKey("uci", "-q", "get", "pbr.policy.dest_addr")] = "45.57.22.134/32\n"
+	runner.outputs[commandKey("uci", "-q", "get", "firewall.rule.dest_ip")] = "54.84.54.3/32\n"
+	if err := reapplyNetworks(runner, c, []string{"45.57.22.134/32"}); err != nil {
+		t.Fatal(err)
+	}
+	commands := runner.commandLines()
+	if !strings.Contains(commands, "uci commit pbr") || !strings.Contains(commands, "uci commit firewall") {
+		t.Fatalf("drifted configuration was not persisted:\n%s", commands)
 	}
 }
 

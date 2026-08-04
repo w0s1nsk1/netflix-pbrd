@@ -128,3 +128,16 @@ func TestConfigRejectsIncompleteDNSProxy(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestLoadConfigValidatesIntervals(t *testing.T) {
+	for field, value := range map[string]string{"interval": "1s", "reapply_interval": "10s"} {
+		path := filepath.Join(t.TempDir(), field+".json")
+		data := `{"role":"controller","state_file":"/tmp/state","api":{"listen":"127.0.0.1:18080","token":"01234567890123456789012345678901","report_token":"abcdefghijklmnopqrstuvwxyz012345","allow_insecure_http":true},"` + field + `":"` + value + `"}`
+		if err := ioutil.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), field) {
+			t.Fatalf("%s: got %v", field, err)
+		}
+	}
+}

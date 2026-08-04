@@ -73,8 +73,10 @@ this daemon manages only destination policy, routes, and firewall rules.
   fetched controller state is never echoed back.
 - Desired, applied, and last-reported state are tracked separately. Failed
   applies and reports are retried without requiring a DNS change.
-- Applied driver state is periodically reinstalled, defaulting to every five
-  minutes, to recover from external route or firewall removal.
+- Applied driver state is periodically verified or reinstalled, defaulting to
+  every five minutes, to recover from external route or firewall removal.
+  OpenWrt checks UCI and service state first, avoiding commits and reloads when
+  both are healthy.
 - Separate read and report bearer tokens with constant-time comparison.
 - Agent reports accept public IPv4 `/32` hosts only. Broader trusted prefixes
   are limited to `/24` or narrower, and `max_networks` defaults to 4096.

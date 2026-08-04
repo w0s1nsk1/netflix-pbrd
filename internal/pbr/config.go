@@ -201,6 +201,12 @@ func LoadConfig(path string) (Config, error) {
 			return c, fmt.Errorf("unsupported apply driver %q", apply.Driver)
 		}
 	}
+	if _, err := c.PollInterval(); err != nil {
+		return c, err
+	}
+	if _, err := c.ReapplyEvery(); err != nil {
+		return c, err
+	}
 	return c, nil
 }
 

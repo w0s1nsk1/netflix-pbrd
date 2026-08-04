@@ -24,6 +24,13 @@ func applyNetworks(runner CommandRunner, c ApplyConfig, nets []string) error {
 	}
 }
 
+func reapplyNetworks(runner CommandRunner, c ApplyConfig, nets []string) error {
+	if c.Driver == "openwrt-pbr" {
+		return reconcileOpenWrt(runner, c, nets)
+	}
+	return applyNetworks(runner, c, nets)
+}
+
 func applyNFTExit(runner CommandRunner, c ApplyConfig, nets []string) error {
 	if c.Chain == "" {
 		c.Chain = "netflix_exit"
@@ -96,15 +103,8 @@ func ensureIPRule(runner CommandRunner, priority, mark, mask, table string) erro
 	return ensureIPRuleText(runner, priority, mark, mask, table)
 }
 
-type ipRule struct {
-	Priority int    `json:"priority"`
-	FWMark   string `json:"fwmark"`
-	FWMask   string `json:"fwmask"`
-	Table    string `json:"table"`
-}
-
 func ensureIPRuleJSON(runner CommandRunner, out []byte, priority, mark, mask, table string) error {
-	var rules []ipRule
+	var rules []map[string]json.RawMessage
 	if err := json.Unmarshal(out, &rules); err != nil {
 		return fmt.Errorf("parse ip -j rule show: %v", err)
 	}
@@ -113,22 +113,62 @@ func ensureIPRuleJSON(runner CommandRunner, out []byte, priority, mark, mask, ta
 	wantMask, _ := strconv.ParseUint(mask, 0, 32)
 	exact := 0
 	for _, rule := range rules {
-		if rule.Priority != wantPriority {
+		if rawInt(rule["priority"]) != wantPriority {
 			continue
 		}
-		ruleMark, markErr := strconv.ParseUint(rule.FWMark, 0, 32)
+		if !onlyExpectedIPRuleFields(rule) || !neutralRuleSelector(rule["src"]) || !neutralRuleSelector(rule["dst"]) || !neutralRuleProtocol(rule["protocol"]) {
+			return fmt.Errorf("ip rule priority %s is already owned by another rule", priority)
+		}
+		ruleMark, markErr := strconv.ParseUint(rawString(rule["fwmark"]), 0, 32)
 		ruleMask := uint64(0xffffffff)
 		var maskErr error
-		if rule.FWMask != "" {
-			ruleMask, maskErr = strconv.ParseUint(rule.FWMask, 0, 32)
+		if value := rawString(rule["fwmask"]); value != "" {
+			ruleMask, maskErr = strconv.ParseUint(value, 0, 32)
 		}
-		if markErr == nil && maskErr == nil && ruleMark == wantMark && ruleMask == wantMask && rule.Table == table {
+		if markErr == nil && maskErr == nil && ruleMark == wantMark && ruleMask == wantMask && rawString(rule["table"]) == table {
 			exact++
 			continue
 		}
 		return fmt.Errorf("ip rule priority %s is already owned by another rule", priority)
 	}
 	return ensureIPRuleCount(runner, exact, priority, mark, mask, table)
+}
+
+func onlyExpectedIPRuleFields(rule map[string]json.RawMessage) bool {
+	for field := range rule {
+		switch field {
+		case "priority", "src", "dst", "fwmark", "fwmask", "table", "protocol":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func neutralRuleSelector(value json.RawMessage) bool {
+	selector := rawString(value)
+	return selector == "" || selector == "all"
+}
+
+func neutralRuleProtocol(value json.RawMessage) bool {
+	protocol := rawString(value)
+	return protocol == "" || protocol == "boot"
+}
+
+func rawString(value json.RawMessage) string {
+	if len(value) == 0 {
+		return ""
+	}
+	var result string
+	if err := json.Unmarshal(value, &result); err == nil {
+		return result
+	}
+	return strings.TrimSpace(string(value))
+}
+
+func rawInt(value json.RawMessage) int {
+	result, _ := strconv.Atoi(rawString(value))
+	return result
 }
 
 func ensureIPRuleText(runner CommandRunner, priority, mark, mask, table string) error {
@@ -251,6 +291,37 @@ func applyOpenWrt(runner CommandRunner, c ApplyConfig, nets []string) error {
 		return err
 	}
 	return runner.Run("/etc/init.d/pbr", "reload")
+}
+
+func reconcileOpenWrt(runner CommandRunner, c ApplyConfig, nets []string) error {
+	pbrNetworks, pbrOK := readUCIList(runner, "pbr."+c.PBRSection+".dest_addr", len(nets) == 0)
+	firewallNetworks, firewallOK := readUCIList(runner, "firewall."+c.FirewallSection+".dest_ip", len(nets) == 0)
+	if !pbrOK || !firewallOK || !Equal(pbrNetworks, nets) || !Equal(firewallNetworks, nets) {
+		return applyOpenWrt(runner, c, nets)
+	}
+	if !succeeds(runner, "/etc/init.d/firewall", "status") {
+		if err := runner.Run("/etc/init.d/firewall", "reload"); err != nil {
+			return err
+		}
+	}
+	if !succeeds(runner, "/etc/init.d/pbr", "status") {
+		return runner.Run("/etc/init.d/pbr", "reload")
+	}
+	return nil
+}
+
+func readUCIList(runner CommandRunner, option string, absentOK bool) ([]string, bool) {
+	out, err := runner.Output("uci", "-q", "get", option)
+	if err != nil {
+		return nil, absentOK
+	}
+	fields := strings.Fields(string(out))
+	limit := len(fields)
+	if limit == 0 {
+		limit = 1
+	}
+	values, err := ValidateNetworks(fields, false, limit)
+	return values, err == nil
 }
 
 func applyExit(runner CommandRunner, c ApplyConfig, nets []string) error {

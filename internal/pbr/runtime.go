@@ -204,9 +204,15 @@ func (r *Runtime) reconcileLocked(ctx context.Context) error {
 	appliedAt := r.appliedAt
 	lastReported := append([]string(nil), r.lastReported...)
 	r.mu.RUnlock()
-	if !appliedKnown || !Equal(desired, applied) || time.Since(appliedAt) >= r.reapplyEvery {
+	changed := !appliedKnown || !Equal(desired, applied)
+	periodic := !changed && time.Since(appliedAt) >= r.reapplyEvery
+	if changed || periodic {
 		for _, apply := range r.config.Apply {
-			if err := applyNetworks(r.runner, apply, desired); err != nil {
+			applyFn := applyNetworks
+			if periodic {
+				applyFn = reapplyNetworks
+			}
+			if err := applyFn(r.runner, apply, desired); err != nil {
 				return fmt.Errorf("apply %s: %v", apply.Driver, err)
 			}
 		}
