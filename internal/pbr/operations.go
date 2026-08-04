@@ -51,8 +51,8 @@ func Doctor(ctx context.Context, config Config, runner CommandRunner) []CheckRes
 				withEdgeDefaults(&apply)
 				args = append(args, "mark", apply.Mark)
 			}
-			out, routeErr := runner.Output("ip", args...)
-			checks = append(checks, CheckResult{Name: "learned route", OK: routeErr == nil && strings.Contains(string(out), "dev "+apply.Interface), Detail: detail(routeErr, strings.TrimSpace(string(out)))})
+			route, routeOK, routeErr := policyRoute(runner, args, apply)
+			checks = append(checks, CheckResult{Name: "learned route", OK: routeOK, Detail: detail(routeErr, route)})
 		}
 	}
 	if config.Role == "agent" {
@@ -168,12 +168,10 @@ func SmokeTest(config Config, runner CommandRunner, name string) (SmokeResult, e
 		switch apply.Driver {
 		case "linux-edge":
 			withEdgeDefaults(&apply)
-			out, routeErr := runner.Output("ip", "route", "get", address, "mark", apply.Mark)
-			if routeErr != nil {
-				return result, routeErr
+			result.Route, result.Confirmed, err = policyRoute(runner, []string{"route", "get", address, "mark", apply.Mark}, apply)
+			if err != nil {
+				return result, err
 			}
-			result.Route = strings.TrimSpace(string(out))
-			result.Confirmed = strings.Contains(result.Route, "dev "+apply.Interface)
 		case "wg-route":
 			out, routeErr := runner.Output("ip", "route", "get", address)
 			if routeErr != nil {
@@ -195,6 +193,25 @@ func SmokeTest(config Config, runner CommandRunner, name string) (SmokeResult, e
 		return result, fmt.Errorf("runtime progress is incomplete: %s", result.Progress)
 	}
 	return result, nil
+}
+
+func policyRoute(runner CommandRunner, routeArgs []string, apply ApplyConfig) (string, bool, error) {
+	out, err := runner.Output("ip", routeArgs...)
+	if err == nil {
+		route := strings.TrimSpace(string(out))
+		return route, strings.Contains(route, "dev "+apply.Interface), nil
+	}
+	if apply.Table == "" {
+		return "", false, err
+	}
+	// Android's toybox ip omits the mark selector. Its dedicated policy table
+	// still provides a deterministic, inspectable proof of the selected path.
+	out, tableErr := runner.Output("ip", "route", "show", "table", apply.Table)
+	if tableErr != nil {
+		return "", false, err
+	}
+	route := "table " + apply.Table + ": " + strings.TrimSpace(string(out))
+	return route, strings.Contains(string(out), "dev "+apply.Interface), nil
 }
 
 func Cleanup(config Config, runner CommandRunner) error {
