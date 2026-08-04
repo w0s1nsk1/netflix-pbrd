@@ -24,6 +24,15 @@ func TestPollInterval(t *testing.T) {
 	}
 }
 
+func TestReapplyInterval(t *testing.T) {
+	if _, err := (Config{ReapplyInterval: "10s"}).ReapplyEvery(); err == nil {
+		t.Fatal("expected short reapply interval error")
+	}
+	if got, err := (Config{}).ReapplyEvery(); err != nil || got.String() != "5m0s" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}
+
 func TestLinuxEdgeAllowsDirectInterfaceRoutes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	data := `{

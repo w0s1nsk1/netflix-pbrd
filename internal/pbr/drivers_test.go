@@ -44,6 +44,7 @@ func TestLinuxExitDoesNotInstallHooksWhenRestoreFails(t *testing.T) {
 
 func TestLinuxEdgeUsesDedicatedTableOnly(t *testing.T) {
 	runner := newFakeRunner()
+	runner.failures[commandKey("ip", "-j", "rule", "show")] = 1
 	runner.outputs[commandKey("ip", "rule", "show")] = ""
 	c := ApplyConfig{Driver: "linux-edge", Interface: "wg-relay", Peer: "peer", BaseAllowed: []string{"0.0.0.0/0"}, SourceNet: "192.168.8.0/24"}
 	if err := applyEdge(runner, c, []string{"45.57.22.134/32"}); err != nil {
@@ -60,6 +61,7 @@ func TestLinuxEdgeUsesDedicatedTableOnly(t *testing.T) {
 
 func TestLinuxEdgeUsesMaskedMarkConfiguredInputAndOnlinkNextHop(t *testing.T) {
 	runner := newFakeRunner()
+	runner.failures[commandKey("ip", "-j", "rule", "show")] = 1
 	runner.outputs[commandKey("ip", "rule", "show")] = ""
 	c := ApplyConfig{Driver: "linux-edge", Interface: "wg-relay", InputInterface: "lan0", Peer: "peer", NextHop: "10.8.0.108", SourceNet: "192.168.8.0/24"}
 	if err := applyEdge(runner, c, []string{"45.57.22.134/32"}); err != nil {
@@ -75,6 +77,7 @@ func TestLinuxEdgeUsesMaskedMarkConfiguredInputAndOnlinkNextHop(t *testing.T) {
 
 func TestLinuxEdgeReturnsCriticalHookFailure(t *testing.T) {
 	runner := newFakeRunner()
+	runner.failures[commandKey("ip", "-j", "rule", "show")] = 1
 	runner.outputs[commandKey("ip", "rule", "show")] = ""
 	runner.failures[commandKey("iptables", "-t", "mangle", "-C", "PREROUTING", "-i", "br+", "-s", "192.168.8.0/24", "-j", "STREAM_PBR")] = 1
 	runner.failures[commandKey("iptables", "-t", "mangle", "-I", "PREROUTING", "1", "-i", "br+", "-s", "192.168.8.0/24", "-j", "STREAM_PBR")] = 1
@@ -86,6 +89,7 @@ func TestLinuxEdgeReturnsCriticalHookFailure(t *testing.T) {
 
 func TestLinuxEdgeDoesNotInstallHookWhenRestoreFails(t *testing.T) {
 	runner := newFakeRunner()
+	runner.failures[commandKey("ip", "-j", "rule", "show")] = 1
 	runner.outputs[commandKey("ip", "rule", "show")] = ""
 	runner.failures[commandKey("/sbin/iptables-restore", "--noflush")] = 1
 	c := ApplyConfig{Driver: "linux-edge", Interface: "wg-relay", Peer: "peer", SourceNet: "192.168.8.0/24"}
@@ -99,7 +103,7 @@ func TestLinuxEdgeDoesNotInstallHookWhenRestoreFails(t *testing.T) {
 
 func TestEnsureIPRuleRejectsConflictingOwner(t *testing.T) {
 	runner := newFakeRunner()
-	runner.outputs[commandKey("ip", "rule", "show")] = "12020: from all lookup main\n"
+	runner.outputs[commandKey("ip", "-j", "rule", "show")] = `[{"priority":12020,"src":"all","table":"main"}]`
 	err := ensureIPRule(runner, "12020", "0x20000000", "0xff000000", "202")
 	if err == nil || !strings.Contains(err.Error(), "owned by another rule") {
 		t.Fatalf("got %v", err)
@@ -111,13 +115,25 @@ func TestEnsureIPRuleRejectsConflictingOwner(t *testing.T) {
 
 func TestEnsureIPRuleRemovesOnlyExactDuplicates(t *testing.T) {
 	runner := newFakeRunner()
-	runner.outputs[commandKey("ip", "rule", "show")] = "12020: from all fwmark 0x20000000/0xff000000 lookup 202\n12020: from all fwmark 0x20000000/0xff000000 lookup 202\n"
+	runner.outputs[commandKey("ip", "-j", "rule", "show")] = `[{"priority":12020,"fwmark":"0x20000000","fwmask":"0xff000000","table":"202"},{"priority":12020,"fwmark":"0x20000000","fwmask":"0xff000000","table":"202"}]`
 	if err := ensureIPRule(runner, "12020", "0x20000000", "0xff000000", "202"); err != nil {
 		t.Fatal(err)
 	}
 	commands := runner.commandLines()
 	if strings.Count(commands, "ip rule del pref 12020 fwmark 0x20000000/0xff000000 lookup 202") != 2 {
 		t.Fatalf("unexpected deletes:\n%s", commands)
+	}
+}
+
+func TestEnsureIPRuleFallsBackWhenJSONIsUnsupported(t *testing.T) {
+	runner := newFakeRunner()
+	runner.failures[commandKey("ip", "-j", "rule", "show")] = 1
+	runner.outputs[commandKey("ip", "rule", "show")] = "12020: from all fwmark 0x20000000/0xff000000 lookup 202\n"
+	if err := ensureIPRule(runner, "12020", "0x20000000", "0xff000000", "202"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(runner.commandLines(), "ip rule add") {
+		t.Fatalf("existing fallback rule was duplicated:\n%s", runner.commandLines())
 	}
 }
 

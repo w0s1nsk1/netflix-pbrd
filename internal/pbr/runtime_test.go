@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const (
@@ -64,6 +65,31 @@ func TestReconcileAppliesEmptyStateOnFirstRun(t *testing.T) {
 	}
 	if input := runner.inputs(); !strings.Contains(input, "ip saddr 10.66.0.0/24 drop") {
 		t.Fatalf("fail-closed table not installed:\n%s", input)
+	}
+}
+
+func TestReconcilePeriodicallyRestoresAppliedState(t *testing.T) {
+	runner := newFakeRunner()
+	runtime, err := newRuntime(Config{
+		Role:      "controller",
+		StateFile: filepath.Join(t.TempDir(), "state"),
+		API:       APIConfig{Token: testReadToken, ReportToken: testReportToken},
+		Apply:     []ApplyConfig{{Driver: "wg-route", Interface: "wg0", Peer: "peer"}},
+	}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	runtime.mu.Lock()
+	runtime.appliedAt = time.Now().Add(-runtime.reapplyEvery)
+	runtime.mu.Unlock()
+	if err := runtime.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(runner.commandLines(), "wg set wg0 peer peer allowed-ips"); got != 2 {
+		t.Fatalf("reapply calls=%d\n%s", got, runner.commandLines())
 	}
 }
 

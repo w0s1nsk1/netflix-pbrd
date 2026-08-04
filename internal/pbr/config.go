@@ -20,14 +20,15 @@ var (
 )
 
 type Config struct {
-	Role         string         `json:"role"`
-	Interval     string         `json:"interval"`
-	StateFile    string         `json:"state_file"`
-	SeedNetworks []string       `json:"seed_networks"`
-	API          APIConfig      `json:"api"`
-	DNSProxy     DNSProxyConfig `json:"dns_proxy"`
-	Apply        []ApplyConfig  `json:"apply"`
-	MaxNetworks  int            `json:"max_networks"`
+	Role            string         `json:"role"`
+	Interval        string         `json:"interval"`
+	ReapplyInterval string         `json:"reapply_interval"`
+	StateFile       string         `json:"state_file"`
+	SeedNetworks    []string       `json:"seed_networks"`
+	API             APIConfig      `json:"api"`
+	DNSProxy        DNSProxyConfig `json:"dns_proxy"`
+	Apply           []ApplyConfig  `json:"apply"`
+	MaxNetworks     int            `json:"max_networks"`
 }
 
 type APIConfig struct {
@@ -229,6 +230,17 @@ func (c Config) PollInterval() (time.Duration, error) {
 	d, err := time.ParseDuration(c.Interval)
 	if err != nil || d < 5*time.Second {
 		return 0, fmt.Errorf("interval must be at least 5s")
+	}
+	return d, nil
+}
+
+func (c Config) ReapplyEvery() (time.Duration, error) {
+	if c.ReapplyInterval == "" {
+		return 5 * time.Minute, nil
+	}
+	d, err := time.ParseDuration(c.ReapplyInterval)
+	if err != nil || d < 30*time.Second {
+		return 0, fmt.Errorf("reapply_interval must be at least 30s")
 	}
 	return d, nil
 }

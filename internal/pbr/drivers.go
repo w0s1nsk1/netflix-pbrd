@@ -1,7 +1,9 @@
 package pbr
 
 import (
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -87,6 +89,49 @@ func allowed(c ApplyConfig, nets []string) string {
 }
 
 func ensureIPRule(runner CommandRunner, priority, mark, mask, table string) error {
+	out, err := runner.Output("ip", "-j", "rule", "show")
+	if err == nil {
+		return ensureIPRuleJSON(runner, out, priority, mark, mask, table)
+	}
+	return ensureIPRuleText(runner, priority, mark, mask, table)
+}
+
+type ipRule struct {
+	Priority int    `json:"priority"`
+	FWMark   string `json:"fwmark"`
+	FWMask   string `json:"fwmask"`
+	Table    string `json:"table"`
+}
+
+func ensureIPRuleJSON(runner CommandRunner, out []byte, priority, mark, mask, table string) error {
+	var rules []ipRule
+	if err := json.Unmarshal(out, &rules); err != nil {
+		return fmt.Errorf("parse ip -j rule show: %v", err)
+	}
+	wantPriority, _ := strconv.Atoi(priority)
+	wantMark, _ := strconv.ParseUint(mark, 0, 32)
+	wantMask, _ := strconv.ParseUint(mask, 0, 32)
+	exact := 0
+	for _, rule := range rules {
+		if rule.Priority != wantPriority {
+			continue
+		}
+		ruleMark, markErr := strconv.ParseUint(rule.FWMark, 0, 32)
+		ruleMask := uint64(0xffffffff)
+		var maskErr error
+		if rule.FWMask != "" {
+			ruleMask, maskErr = strconv.ParseUint(rule.FWMask, 0, 32)
+		}
+		if markErr == nil && maskErr == nil && ruleMark == wantMark && ruleMask == wantMask && rule.Table == table {
+			exact++
+			continue
+		}
+		return fmt.Errorf("ip rule priority %s is already owned by another rule", priority)
+	}
+	return ensureIPRuleCount(runner, exact, priority, mark, mask, table)
+}
+
+func ensureIPRuleText(runner CommandRunner, priority, mark, mask, table string) error {
 	out, err := runner.Output("ip", "rule", "show")
 	if err != nil {
 		return err
@@ -104,6 +149,10 @@ func ensureIPRule(runner CommandRunner, priority, mark, mask, table string) erro
 		}
 		return fmt.Errorf("ip rule priority %s is already owned by another rule: %s", priority, line)
 	}
+	return ensureIPRuleCount(runner, exact, priority, mark, mask, table)
+}
+
+func ensureIPRuleCount(runner CommandRunner, exact int, priority, mark, mask, table string) error {
 	if exact == 1 {
 		return nil
 	}

@@ -47,7 +47,10 @@ The edge proxies DNS, learns trusted Netflix answers and CNAME targets, and
 synchronously reports each learned address before returning it to the client.
 There is no endpoint bootstrap list. The edge installs destination routes and
 packet marks. The controller routes reported destinations to the relay peer,
-and the OpenWrt relay applies its WAN PBR and firewall policy.
+and the OpenWrt relay uses a static source policy for the dedicated controller
+WireGuard network. The relay does not poll the controller: because only learned
+Netflix destinations are routed into that peer, its final-hop forwarding and
+WAN policy can be ready before any DNS answer is returned.
 
 ### Client and public exit server
 
@@ -70,6 +73,8 @@ this daemon manages only destination policy, routes, and firewall rules.
   fetched controller state is never echoed back.
 - Desired, applied, and last-reported state are tracked separately. Failed
   applies and reports are retried without requiring a DNS change.
+- Applied driver state is periodically reinstalled, defaulting to every five
+  minutes, to recover from external route or firewall removal.
 - Separate read and report bearer tokens with constant-time comparison.
 - Agent reports accept public IPv4 `/32` hosts only. Broader trusted prefixes
   are limited to `/24` or narrower, and `max_networks` defaults to 4096.
@@ -95,7 +100,7 @@ Choose and adapt one of the files in [`configs/`](configs/):
 - `nested-edge.example.json`
 - `controller-relay.example.json`
 - `edge.example.json`
-- `openwrt-relay.example.json`
+- `openwrt-relay-static.example.sh`
 - `public-server.example.json`
 - `public-client.example.json`
 
@@ -139,8 +144,13 @@ systemctl daemon-reload
 systemctl enable --now netflix-pbrd
 ```
 
-For OpenWrt, install the `arm64` binary as `/usr/sbin/netflix-pbrd`, copy the
-procd service from `packaging/openwrt/`, and enable it through `/etc/init.d`.
+For an OpenWrt controller/exit, install the `arm64` binary as
+`/usr/sbin/netflix-pbrd`, copy the procd service from `packaging/openwrt/`, and
+enable it through `/etc/init.d`. A separate transit relay does not run the
+daemon. Adapt and run `configs/openwrt-relay-static.example.sh` once after its
+WireGuard network and WAN PBR interface exist. Its WAN firewall zone must have
+masquerading enabled. Apply this static relay policy before enabling the edge
+DNS proxy.
 
 For Entware on an ARMv7 gateway, install the binary as
 `/opt/sbin/netflix-pbrd`, the configuration under `/opt/etc/`, and use the
@@ -155,6 +165,8 @@ Omit it for a point-to-point WireGuard
 interface so routes are installed directly with `dev <interface>`. The driver
 installs only a default route in its dedicated policy table; destination
 selection remains scoped to `source_net` by the mangle mark and `ip rule`.
+Set `reapply_interval` to change periodic driver reconciliation; the minimum is
+30 seconds and the default is five minutes.
 
 ## Public server requirements
 

@@ -1,6 +1,7 @@
 {
   "role": "controller",
   "interval": "15s",
+  "reapply_interval": "5m",
   "state_file": "/var/lib/netflix-pbrd/networks.state",
   "api": {
     "listen": "10.8.0.1:18080",

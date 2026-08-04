@@ -21,6 +21,7 @@ type APIResponse struct {
 type Runtime struct {
 	config       Config
 	interval     time.Duration
+	reapplyEvery time.Duration
 	runner       CommandRunner
 	client       *http.Client
 	syncMu       sync.Mutex
@@ -29,6 +30,7 @@ type Runtime struct {
 	learned      []string
 	applied      []string
 	appliedKnown bool
+	appliedAt    time.Time
 	lastReported []string
 	updated      time.Time
 }
@@ -39,6 +41,10 @@ func NewRuntime(c Config) (*Runtime, error) {
 
 func newRuntime(c Config, runner CommandRunner) (*Runtime, error) {
 	interval, err := c.PollInterval()
+	if err != nil {
+		return nil, err
+	}
+	reapplyEvery, err := c.ReapplyEvery()
 	if err != nil {
 		return nil, err
 	}
@@ -63,13 +69,14 @@ func newRuntime(c Config, runner CommandRunner) (*Runtime, error) {
 		return nil, fmt.Errorf("state: %v", err)
 	}
 	return &Runtime{
-		config:   c,
-		interval: interval,
-		runner:   runner,
-		client:   &http.Client{Timeout: 15 * time.Second},
-		desired:  desired,
-		learned:  learned,
-		updated:  time.Now().UTC(),
+		config:       c,
+		interval:     interval,
+		reapplyEvery: reapplyEvery,
+		runner:       runner,
+		client:       &http.Client{Timeout: 15 * time.Second},
+		desired:      desired,
+		learned:      learned,
+		updated:      time.Now().UTC(),
 	}, nil
 }
 
@@ -194,9 +201,10 @@ func (r *Runtime) reconcileLocked(ctx context.Context) error {
 	learned := append([]string(nil), r.learned...)
 	applied := append([]string(nil), r.applied...)
 	appliedKnown := r.appliedKnown
+	appliedAt := r.appliedAt
 	lastReported := append([]string(nil), r.lastReported...)
 	r.mu.RUnlock()
-	if !appliedKnown || !Equal(desired, applied) {
+	if !appliedKnown || !Equal(desired, applied) || time.Since(appliedAt) >= r.reapplyEvery {
 		for _, apply := range r.config.Apply {
 			if err := applyNetworks(r.runner, apply, desired); err != nil {
 				return fmt.Errorf("apply %s: %v", apply.Driver, err)
@@ -205,6 +213,7 @@ func (r *Runtime) reconcileLocked(ctx context.Context) error {
 		r.mu.Lock()
 		r.applied = append([]string(nil), desired...)
 		r.appliedKnown = true
+		r.appliedAt = time.Now()
 		r.mu.Unlock()
 		log.Printf("applied %d networks", len(desired))
 	}
