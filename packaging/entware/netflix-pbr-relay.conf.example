@@ -9,6 +9,9 @@ RELAY_MTU=1340
 RELAY_KEEPALIVE=25
 EDGE_TABLE=202
 
+# Optional deployment-specific DNS redirect service kept healthy by watchdog.
+DNS_REDIRECT_SERVICE=
+
 # Optional platform-specific INPUT exception.
 INPUT_CHAIN=
 INPUT_PEER_SOURCE=

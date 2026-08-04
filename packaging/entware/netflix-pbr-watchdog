@@ -8,6 +8,10 @@ CONFIG=${NETFLIX_PBR_RELAY_CONFIG:-/opt/etc/netflix-pbr-relay.conf}
 : "${RELAY_INTERFACE:?RELAY_INTERFACE is required}"
 EDGE_TABLE=${EDGE_TABLE:-202}
 
+if [ -n "$DNS_REDIRECT_SERVICE" ] && [ -x "$DNS_REDIRECT_SERVICE" ]; then
+	"$DNS_REDIRECT_SERVICE" start || exit 1
+fi
+
 if ! ip link show "$RELAY_INTERFACE" >/dev/null 2>&1; then
 	/opt/etc/init.d/S47wg-relay start || exit 1
 fi
