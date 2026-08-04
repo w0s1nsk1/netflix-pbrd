@@ -1,9 +1,9 @@
 # netflix-pbrd
 
-`netflix-pbrd` keeps policy-based routing rules synchronized with the rotating
-IPv4 addresses returned by Netflix service endpoints. It is designed for
-WireGuard gateways, OpenWrt routers, small embedded Linux devices, and public
-exit servers.
+`netflix-pbrd` learns the rotating IPv4 addresses used by Netflix applications
+from their real DNS traffic and keeps policy-based routing rules synchronized.
+It is designed for WireGuard gateways, OpenWrt routers, small embedded Linux
+devices, and public exit servers.
 
 This project is not affiliated with or endorsed by Netflix.
 
@@ -16,12 +16,16 @@ LAN device -> edge -> inner WireGuard -> exit router -> Internet
                        (transported by an outer WireGuard hub)
 ```
 
-This is the preferred three-host layout. The outer hub transports only the
+This is the preferred three-host layout. The edge DNS proxy learns addresses
+before returning DNS answers and reports them synchronously to the exit. The
+outer hub transports only the
 encrypted UDP session between the edge and exit peers; it does not need
 Netflix routes, destination AllowedIPs, or a `netflix-pbrd` process. The exit
-router runs the controller and applies one static source policy for the edge
-LAN. The edge agent installs the rotating Netflix routes on the inner
-WireGuard interface.
+router runs the controller and applies a fail-closed exit policy. The edge
+agent installs the learned Netflix marks on the inner WireGuard interface.
+If the exit's default route is not its desired WAN, configure one static source
+policy routing `source_net` to that WAN; `linux-exit` then restricts forwarding
+and NAT to learned Netflix destinations.
 
 The example configs use `172.31.255.1/30` for the exit and
 `172.31.255.2/30` for the edge. Configure the inner exit peer with the edge LAN
@@ -35,7 +39,8 @@ starting point for WireGuard inside WireGuard.
 LAN device -> edge router -> WireGuard controller -> relay router -> Internet
 ```
 
-The controller resolves service domains and publishes a monotonic network set.
+The controller proxies DNS, learns trusted Netflix answers and CNAME targets,
+and publishes a monotonic network set. There is no endpoint bootstrap list.
 The edge installs destination routes and packet marks. The controller routes
 those destinations to the relay peer, and the OpenWrt relay applies its WAN PBR
 and firewall policy.
@@ -53,10 +58,12 @@ this daemon manages only destination policy, routes, and firewall rules.
 ## Properties
 
 - One static Go binary for `amd64`, `arm64`, and `armv7`.
+- DNS learning recognizes Netflix-owned suffixes, future app-version hostnames,
+  Netflix service ELBs, and CNAME chains without enumerating endpoint names.
 - Monotonic state: previously observed addresses are retained across DNS
   rotation and process restarts.
-- Authenticated agent reports merge edge history back into the controller, so
-  every hop converges on the same destination set.
+- Authenticated agent reports contain only addresses learned by that agent;
+  fetched controller state is never echoed back.
 - Desired, applied, and last-reported state are tracked separately. Failed
   applies and reports are retried without requiring a DNS change.
 - Separate read and report bearer tokens with constant-time comparison.
@@ -104,6 +111,14 @@ Validate a configuration without changing networking state:
 netflix-pbrd -config /etc/netflix-pbrd.json -check
 ```
 
+The learning proxy requires both UDP and TCP DNS traffic from the application
+devices to reach `dns_proxy.listen`. Forward those requests to the proxy port;
+the proxy sends them to `dns_proxy.upstream` and returns the original response.
+For example, a gateway can redirect selected source devices to
+`10.8.0.1:1053`, while the controller forwards requests to its existing local
+resolver at `127.0.0.1:53`. Do not redirect the proxy's own upstream traffic
+back to the learning port.
+
 ## Install
 
 On a regular Linux controller or public server:
@@ -147,9 +162,11 @@ into an unrestricted VPN gateway.
 
 ## Operational notes
 
-State files are intentionally monotonic. Remove a state file only when you
-explicitly want to forget historical destinations. Restarting the service then
-rebuilds the set from configured seed networks and current DNS answers.
+State files are intentionally monotonic. Remove a controller state file only
+when you explicitly want to forget historical destinations. The controller
+then rebuilds the set from DNS answers actually requested by Netflix
+applications. After a successful fetch, agents replace their startup state
+with the current controller set instead of retaining obsolete bootstrap data.
 
 Run the daemon as root because route, WireGuard, iptables, and UCI updates need
 network-administration privileges. Keep the JSON configuration readable only

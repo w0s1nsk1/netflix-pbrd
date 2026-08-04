@@ -70,6 +70,7 @@ func TestReconcileRetriesFailedReportWithoutReapplying(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime.client = &http.Client{Transport: transport}
+	runtime.learned = []string{"45.57.22.134/32"}
 	if err := runtime.reconcile(context.Background()); err == nil {
 		t.Fatal("expected first report failure")
 	}
@@ -80,6 +81,43 @@ func TestReconcileRetriesFailedReportWithoutReapplying(t *testing.T) {
 		t.Fatalf("posts=%d", posts)
 	}
 	if got := strings.Count(runner.commandLines(), "wg set wg0 peer peer allowed-ips 45.57.22.134/32"); got != 1 {
+		t.Fatalf("apply calls=%d\n%s", got, runner.commandLines())
+	}
+}
+
+func TestAgentReplacesBootstrapStateAfterSuccessfulFetch(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	if err := SaveState(state, []string{"45.57.22.134/32"}); err != nil {
+		t.Fatal(err)
+	}
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{"version":1,"networks":["54.84.54.3/32"]}`
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: ioutil.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+	runner := newFakeRunner()
+	runtime, err := newRuntime(Config{
+		Role:      "agent",
+		StateFile: state,
+		API:       APIConfig{SourceURL: "http://controller.test/v1/networks", Token: testReadToken, ReportToken: testReportToken},
+		Apply:     []ApplyConfig{{Driver: "wg-route", Interface: "wg0", Peer: "peer"}},
+	}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.client = &http.Client{Transport: transport}
+	if err := runtime.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !Equal(runtime.desired, []string{"54.84.54.3/32"}) {
+		t.Fatalf("desired=%v", runtime.desired)
+	}
+	if strings.Contains(runner.commandLines(), "allowed-ips 45.57.22.134/32,54.84.54.3/32") {
+		t.Fatal("old bootstrap state was merged into fetched state")
+	}
+	if got := strings.Count(runner.commandLines(), "wg set wg0 peer peer allowed-ips"); got != 2 {
 		t.Fatalf("apply calls=%d\n%s", got, runner.commandLines())
 	}
 }

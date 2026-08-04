@@ -7,6 +7,10 @@
     "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN",
     "report_token": "REPLACE_WITH_A_DIFFERENT_LONG_REPORT_TOKEN"
   },
+  "dns_proxy": {
+    "listen": "192.168.50.1:1053",
+    "upstream": "1.1.1.1:53"
+  },
   "apply": [{
     "driver": "linux-edge",
     "interface": "wg0",

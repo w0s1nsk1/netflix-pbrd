@@ -8,18 +8,9 @@
     "report_token": "REPLACE_WITH_A_DIFFERENT_LONG_REPORT_TOKEN",
     "allow_insecure_http": true
   },
-  "discovery": {
-    "dns_server": "10.8.0.1:53",
-    "domains": [
-      "api-global.netflix.com",
-      "nrdp52-appboot.netflix.com",
-      "cast.netflix.com",
-      "cast-uiboot.prod.cloud.netflix.com",
-      "ios.ngp.prod.cloud.netflix.com",
-      "ios26.appboot.netflix.com",
-      "android14-tman.prod.cloud.netflix.com",
-      "android.prod.cloud.netflix.com"
-    ]
+  "dns_proxy": {
+    "listen": "10.8.0.1:1053",
+    "upstream": "127.0.0.1:53"
   },
   "apply": [{
     "driver": "wg-route",

@@ -8,20 +8,10 @@
     "report_token": "REPLACE_WITH_A_DIFFERENT_LONG_REPORT_TOKEN",
     "allow_insecure_http": true
   },
-  "discovery": {
-    "dns_server": "127.0.0.1:53",
-    "domains": [
-      "apiproxy-device-prod-nlb-3-a6ae1986950e693f.elb.us-east-1.amazonaws.com",
-      "apiproxy-device-prod-nlb-2-300c995e1ce8a001.elb.us-east-1.amazonaws.com",
-      "cast-uiboot.prod.cloud.netflix.com",
-      "cast.netflix.com",
-      "api-global.netflix.com",
-      "nrdp52-appboot.netflix.com",
-      "ios.ngp.prod.cloud.netflix.com",
-      "ios26.appboot.netflix.com",
-      "android14-tman.prod.cloud.netflix.com",
-      "android.prod.cloud.netflix.com",
-      "pushy-prod-nlb4-shard2-9274479dbff3f3e0.elb.us-east-1.amazonaws.com"
-    ]
-  }
+  "apply": [{
+    "driver": "linux-exit",
+    "source_net": "192.168.8.0/24",
+    "wan_interface": "wan",
+    "chain": "NETFLIX_EXIT"
+  }]
 }

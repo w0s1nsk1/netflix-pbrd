@@ -97,3 +97,25 @@ func TestConfigRejectsUnsafeCommandFields(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestConfigAcceptsLearningControllerWithoutBootstrapDomains(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"role":"controller","state_file":"/tmp/state","api":{"listen":"127.0.0.1:18080","token":"01234567890123456789012345678901","report_token":"abcdefghijklmnopqrstuvwxyz012345","allow_insecure_http":true},"dns_proxy":{"listen":"127.0.0.1:1053","upstream":"127.0.0.1:53"}}`
+	if err := ioutil.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConfigRejectsIncompleteDNSProxy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"role":"controller","state_file":"/tmp/state","api":{"listen":"127.0.0.1:18080","token":"01234567890123456789012345678901","report_token":"abcdefghijklmnopqrstuvwxyz012345","allow_insecure_http":true},"dns_proxy":{"listen":"127.0.0.1:1053"}}`
+	if err := ioutil.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "dns_proxy") {
+		t.Fatalf("got %v", err)
+	}
+}

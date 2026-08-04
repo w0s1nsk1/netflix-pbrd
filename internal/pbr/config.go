@@ -19,14 +19,14 @@ var (
 )
 
 type Config struct {
-	Role         string        `json:"role"`
-	Interval     string        `json:"interval"`
-	StateFile    string        `json:"state_file"`
-	SeedNetworks []string      `json:"seed_networks"`
-	API          APIConfig     `json:"api"`
-	Discovery    Discovery     `json:"discovery"`
-	Apply        []ApplyConfig `json:"apply"`
-	MaxNetworks  int           `json:"max_networks"`
+	Role         string         `json:"role"`
+	Interval     string         `json:"interval"`
+	StateFile    string         `json:"state_file"`
+	SeedNetworks []string       `json:"seed_networks"`
+	API          APIConfig      `json:"api"`
+	DNSProxy     DNSProxyConfig `json:"dns_proxy"`
+	Apply        []ApplyConfig  `json:"apply"`
+	MaxNetworks  int            `json:"max_networks"`
 }
 
 type APIConfig struct {
@@ -39,9 +39,11 @@ type APIConfig struct {
 	AllowInsecureHTTP bool   `json:"allow_insecure_http"`
 }
 
-type Discovery struct {
-	DNSServer string   `json:"dns_server"`
-	Domains   []string `json:"domains"`
+type DNSProxyConfig struct {
+	Listen          string   `json:"listen"`
+	Upstream        string   `json:"upstream"`
+	TrustedSuffixes []string `json:"trusted_suffixes"`
+	ServicePrefixes []string `json:"service_prefixes"`
 }
 
 type ApplyConfig struct {
@@ -75,9 +77,6 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if c.StateFile == "" {
 		return c, fmt.Errorf("state_file is required")
-	}
-	if c.Role == "controller" && len(c.Discovery.Domains) == 0 {
-		return c, fmt.Errorf("controller requires discovery.domains")
 	}
 	if c.Role == "agent" && c.API.SourceURL == "" {
 		return c, fmt.Errorf("agent requires api.source_url")
@@ -117,6 +116,14 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if c.API.Listen != "" && (c.API.TLSCert == "" || c.API.TLSKey == "") && !c.API.AllowInsecureHTTP {
 		return c, fmt.Errorf("TLS is required unless allow_insecure_http is true")
+	}
+	if c.DNSProxy.Listen != "" || c.DNSProxy.Upstream != "" {
+		if !validHostPort(c.DNSProxy.Listen) || !validHostPort(c.DNSProxy.Upstream) {
+			return c, fmt.Errorf("dns_proxy.listen and dns_proxy.upstream must be valid host:port addresses")
+		}
+		if c.DNSProxy.Listen == c.DNSProxy.Upstream {
+			return c, fmt.Errorf("dns_proxy.listen and dns_proxy.upstream must differ")
+		}
 	}
 	for _, apply := range c.Apply {
 		if apply.Interface != "" && !interfacePattern.MatchString(apply.Interface) {
@@ -176,6 +183,15 @@ func LoadConfig(path string) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+func validHostPort(value string) bool {
+	host, port, err := net.SplitHostPort(value)
+	if err != nil || host == "" || port == "" {
+		return false
+	}
+	valuePort, err := strconv.Atoi(port)
+	return err == nil && valuePort > 0 && valuePort <= 65535 && net.ParseIP(host) != nil
 }
 
 func validIPv4CIDR(value string) bool {

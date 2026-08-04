@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -27,6 +26,7 @@ type Runtime struct {
 	syncMu       sync.Mutex
 	mu           sync.RWMutex
 	desired      []string
+	learned      []string
 	applied      []string
 	lastReported []string
 	updated      time.Time
@@ -68,6 +68,11 @@ func (r *Runtime) Run(ctx context.Context) error {
 	if err := r.reconcile(ctx); err != nil {
 		log.Printf("initial apply: %v", err)
 	}
+	if r.config.DNSProxy.Listen != "" {
+		if err := startDNSProxy(ctx, r.config.DNSProxy, r.learn); err != nil {
+			return err
+		}
+	}
 	if r.config.API.Listen != "" {
 		go r.serve(ctx)
 	}
@@ -92,19 +97,17 @@ func (r *Runtime) sync(ctx context.Context) error {
 	r.syncMu.Lock()
 	defer r.syncMu.Unlock()
 
-	var discovered []string
-	var discoveryErr error
 	if r.config.Role == "controller" {
-		discovered, discoveryErr = r.resolve(ctx)
-	} else {
-		discovered, discoveryErr = r.fetch(ctx)
+		return r.reconcileLocked(ctx)
 	}
+	discovered, discoveryErr := r.fetch(ctx)
 
 	if discoveryErr == nil {
 		r.mu.RLock()
 		previous := append([]string(nil), r.desired...)
+		locallyLearned := append([]string(nil), r.learned...)
 		r.mu.RUnlock()
-		next, err := ValidateNetworks(Merge(previous, discovered, r.config.SeedNetworks), false, maxNetworks(r.config))
+		next, err := ValidateNetworks(Merge(discovered, locallyLearned, r.config.SeedNetworks), false, maxNetworks(r.config))
 		if err != nil {
 			return err
 		}
@@ -126,6 +129,42 @@ func (r *Runtime) sync(ctx context.Context) error {
 	return discoveryErr
 }
 
+func (r *Runtime) learn(ctx context.Context, networks []string) error {
+	r.syncMu.Lock()
+	defer r.syncMu.Unlock()
+
+	learned, err := ValidateNetworks(networks, true, maxNetworks(r.config))
+	if err != nil {
+		return err
+	}
+	r.mu.RLock()
+	previous := append([]string(nil), r.desired...)
+	previousLearned := append([]string(nil), r.learned...)
+	r.mu.RUnlock()
+	nextLearned, err := ValidateNetworks(Merge(previousLearned, learned), true, maxNetworks(r.config))
+	if err != nil {
+		return err
+	}
+	next, err := ValidateNetworks(Merge(previous, nextLearned, r.config.SeedNetworks), false, maxNetworks(r.config))
+	if err != nil {
+		return err
+	}
+	if !Equal(previous, next) {
+		if err := SaveState(r.config.StateFile, next); err != nil {
+			return err
+		}
+		log.Printf("learned %d new Netflix addresses", len(next)-len(previous))
+	}
+	r.mu.Lock()
+	r.desired = next
+	r.learned = nextLearned
+	if !Equal(previous, next) {
+		r.updated = time.Now().UTC()
+	}
+	r.mu.Unlock()
+	return r.reconcileLocked(ctx)
+}
+
 func (r *Runtime) reconcile(ctx context.Context) error {
 	r.syncMu.Lock()
 	defer r.syncMu.Unlock()
@@ -135,13 +174,10 @@ func (r *Runtime) reconcile(ctx context.Context) error {
 func (r *Runtime) reconcileLocked(ctx context.Context) error {
 	r.mu.RLock()
 	desired := append([]string(nil), r.desired...)
+	learned := append([]string(nil), r.learned...)
 	applied := append([]string(nil), r.applied...)
 	lastReported := append([]string(nil), r.lastReported...)
 	r.mu.RUnlock()
-	if len(desired) == 0 {
-		return nil
-	}
-
 	if !Equal(desired, applied) {
 		for _, apply := range r.config.Apply {
 			if err := applyNetworks(r.runner, apply, desired); err != nil {
@@ -154,12 +190,12 @@ func (r *Runtime) reconcileLocked(ctx context.Context) error {
 		log.Printf("applied %d networks", len(desired))
 	}
 
-	if r.config.Role == "agent" && !Equal(desired, lastReported) {
-		if err := r.report(ctx, desired); err != nil {
+	if r.config.Role == "agent" && !Equal(learned, lastReported) {
+		if err := r.report(ctx, learned); err != nil {
 			return fmt.Errorf("report: %v", err)
 		}
 		r.mu.Lock()
-		r.lastReported = append([]string(nil), desired...)
+		r.lastReported = append([]string(nil), learned...)
 		r.mu.Unlock()
 	}
 	return nil
@@ -170,32 +206,6 @@ func maxNetworks(c Config) int {
 		return DefaultMaxNetworks
 	}
 	return c.MaxNetworks
-}
-
-func (r *Runtime) resolve(ctx context.Context) ([]string, error) {
-	resolver := net.DefaultResolver
-	if r.config.Discovery.DNSServer != "" {
-		resolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "udp", r.config.Discovery.DNSServer)
-		}}
-	}
-	var values []string
-	for _, domain := range r.config.Discovery.Domains {
-		ips, err := resolver.LookupIPAddr(ctx, domain)
-		if err != nil {
-			log.Printf("resolve %s: %v", domain, err)
-			continue
-		}
-		for _, item := range ips {
-			if item.IP.To4() != nil {
-				values = append(values, item.IP.String())
-			}
-		}
-	}
-	if len(values) == 0 {
-		return nil, fmt.Errorf("no domains resolved")
-	}
-	return ValidateNetworks(values, false, maxNetworks(r.config))
 }
 
 func (r *Runtime) fetch(ctx context.Context) ([]string, error) {
