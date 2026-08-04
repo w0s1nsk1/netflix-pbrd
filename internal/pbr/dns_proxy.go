@@ -1,10 +1,14 @@
 package pbr
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -46,14 +50,7 @@ func newDNSLearner(config DNSProxyConfig, learn func(context.Context, []string) 
 }
 
 func (l *dnsLearner) ServeDNS(w dns.ResponseWriter, request *dns.Msg) {
-	upstreamRequest := request.Copy()
-	addClientSubnet(upstreamRequest, w.RemoteAddr())
-	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second}
-	response, _, err := client.Exchange(upstreamRequest, l.config.Upstream)
-	if err == nil && response.Truncated {
-		client.Net = "tcp"
-		response, _, err = client.Exchange(upstreamRequest, l.config.Upstream)
-	}
+	response, err := l.exchange(request, w.RemoteAddr())
 	if err != nil {
 		failure := new(dns.Msg)
 		failure.SetRcode(request, dns.RcodeServerFailure)
@@ -70,6 +67,56 @@ func (l *dnsLearner) ServeDNS(w dns.ResponseWriter, request *dns.Msg) {
 	if err := w.WriteMsg(response); err != nil {
 		log.Printf("dns proxy response: %v", err)
 	}
+}
+
+func (l *dnsLearner) exchange(request *dns.Msg, remote net.Addr) (*dns.Msg, error) {
+	upstreamRequest := request.Copy()
+	if l.config.DoHURL != "" {
+		return l.exchangeDoH(upstreamRequest, remote)
+	}
+	addClientSubnet(upstreamRequest, remote)
+	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second}
+	response, _, err := client.Exchange(upstreamRequest, l.config.Upstream)
+	if err == nil && response.Truncated {
+		client.Net = "tcp"
+		response, _, err = client.Exchange(upstreamRequest, l.config.Upstream)
+	}
+	return response, err
+}
+
+func (l *dnsLearner) exchangeDoH(message *dns.Msg, remote net.Addr) (*dns.Msg, error) {
+	payload, err := message.Pack()
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequest(http.MethodPost, l.config.DoHURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/dns-message")
+	request.Header.Set("Accept", "application/dns-message")
+	if remote != nil {
+		if host, _, splitErr := net.SplitHostPort(remote.String()); splitErr == nil && net.ParseIP(host) != nil {
+			request.Header.Set("X-Real-IP", host)
+		}
+	}
+	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("DoH upstream returned %s", response.Status)
+	}
+	body, err := ioutil.ReadAll(io.LimitReader(response.Body, 65536))
+	if err != nil {
+		return nil, err
+	}
+	result := new(dns.Msg)
+	if err := result.Unpack(body); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func addClientSubnet(message *dns.Msg, remote net.Addr) {

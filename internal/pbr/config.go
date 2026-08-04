@@ -42,6 +42,7 @@ type APIConfig struct {
 type DNSProxyConfig struct {
 	Listen          string   `json:"listen"`
 	Upstream        string   `json:"upstream"`
+	DoHURL          string   `json:"doh_url"`
 	TrustedSuffixes []string `json:"trusted_suffixes"`
 	ServicePrefixes []string `json:"service_prefixes"`
 }
@@ -117,12 +118,24 @@ func LoadConfig(path string) (Config, error) {
 	if c.API.Listen != "" && (c.API.TLSCert == "" || c.API.TLSKey == "") && !c.API.AllowInsecureHTTP {
 		return c, fmt.Errorf("TLS is required unless allow_insecure_http is true")
 	}
-	if c.DNSProxy.Listen != "" || c.DNSProxy.Upstream != "" {
-		if !validHostPort(c.DNSProxy.Listen) || !validHostPort(c.DNSProxy.Upstream) {
-			return c, fmt.Errorf("dns_proxy.listen and dns_proxy.upstream must be valid host:port addresses")
+	if c.DNSProxy.Listen != "" || c.DNSProxy.Upstream != "" || c.DNSProxy.DoHURL != "" {
+		if !validHostPort(c.DNSProxy.Listen) {
+			return c, fmt.Errorf("dns_proxy.listen must be a valid host:port address")
 		}
-		if c.DNSProxy.Listen == c.DNSProxy.Upstream {
+		if (c.DNSProxy.Upstream == "") == (c.DNSProxy.DoHURL == "") {
+			return c, fmt.Errorf("dns_proxy requires exactly one of upstream or doh_url")
+		}
+		if c.DNSProxy.Upstream != "" && !validHostPort(c.DNSProxy.Upstream) {
+			return c, fmt.Errorf("dns_proxy.upstream must be a valid host:port address")
+		}
+		if c.DNSProxy.Upstream != "" && c.DNSProxy.Listen == c.DNSProxy.Upstream {
 			return c, fmt.Errorf("dns_proxy.listen and dns_proxy.upstream must differ")
+		}
+		if c.DNSProxy.DoHURL != "" {
+			u, err := url.Parse(c.DNSProxy.DoHURL)
+			if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+				return c, fmt.Errorf("dns_proxy.doh_url must be an absolute HTTP or HTTPS URL")
+			}
 		}
 	}
 	for _, apply := range c.Apply {

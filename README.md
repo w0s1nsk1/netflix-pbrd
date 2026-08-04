@@ -123,6 +123,11 @@ For example, a gateway can redirect selected source devices to
 resolver at `127.0.0.1:53`. Do not redirect the proxy's own upstream traffic
 back to the learning port.
 
+As an alternative to `upstream`, configure `doh_url`. The proxy then sends
+DNS-message POST requests with the original client in `X-Real-IP`. Add only the
+proxy address to AdGuard Home's `trusted_proxies`; AdGuard can then attribute
+query-log entries and client policies to the real device instead of the proxy.
+
 ## Install
 
 On a regular Linux controller or public server:

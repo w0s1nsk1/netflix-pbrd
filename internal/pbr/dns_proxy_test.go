@@ -2,12 +2,58 @@ package pbr
 
 import (
 	"context"
+	"io/ioutil"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/miekg/dns"
 )
+
+func TestDNSLearnerForwardsDoHWithRealClientIP(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("network namespace does not allow listeners: %v", err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("X-Real-IP"); got != "192.168.8.230" {
+			t.Errorf("X-Real-IP=%q", got)
+		}
+		body, err := ioutil.ReadAll(request.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		query := new(dns.Msg)
+		if err := query.Unpack(body); err != nil {
+			t.Error(err)
+			return
+		}
+		response := new(dns.Msg)
+		response.SetReply(query)
+		response.Answer = []dns.RR{&dns.A{
+			Hdr: dns.RR_Header{Name: query.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   net.ParseIP("45.57.22.134"),
+		}}
+		payload, _ := response.Pack()
+		w.Header().Set("Content-Type", "application/dns-message")
+		_, _ = w.Write(payload)
+	})}
+	go server.Serve(listener)
+	defer server.Shutdown(context.Background())
+
+	learner := newDNSLearner(DNSProxyConfig{DoHURL: "http://" + listener.Addr().String() + "/dns-query"}, nil)
+	query := new(dns.Msg)
+	query.SetQuestion("android.prod.cloud.netflix.com.", dns.TypeA)
+	response, err := learner.exchange(query, &net.UDPAddr{IP: net.ParseIP("192.168.8.230"), Port: 53000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Answer) != 1 {
+		t.Fatalf("answers=%d", len(response.Answer))
+	}
+}
 
 func TestDNSProxyForwardsUDPAndTCPBeforeLearningReturns(t *testing.T) {
 	upstreamTCP, err := net.Listen("tcp", "127.0.0.1:0")
