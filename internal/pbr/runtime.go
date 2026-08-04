@@ -270,12 +270,16 @@ func (r *Runtime) recordStatus(lastError string) {
 		r.lastError = lastError
 		r.lastErrorAt = time.Now().UTC()
 	}
+	learnedCount := len(r.learned)
+	if r.config.Role == "controller" {
+		learnedCount = len(r.desired)
+	}
 	status := OperationalStatus{
 		Version:      1,
 		Role:         r.config.Role,
 		PID:          os.Getpid(),
 		Desired:      len(r.desired),
-		Learned:      len(r.learned),
+		Learned:      learnedCount,
 		Applied:      len(r.applied),
 		Reported:     len(r.lastReported),
 		AppliedKnown: r.appliedKnown,

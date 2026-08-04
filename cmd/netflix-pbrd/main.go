@@ -170,7 +170,13 @@ func statusCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("role: %s\nlearned -> applied -> reported: %d -> %d -> %d\ndesired: %d\nlast apply: %s\nlast report: %s\n", status.Role, status.Learned, status.Applied, status.Reported, status.Desired, formatTime(status.LastApply), formatTime(status.LastReport))
+	fmt.Printf("role: %s\n", status.Role)
+	if status.Role == "agent" {
+		fmt.Printf("learned -> applied -> reported: %d -> %d -> %d\n", status.Learned, status.Applied, status.Reported)
+	} else {
+		fmt.Printf("learned -> applied: %d -> %d\nreported: n/a (controller receives reports)\n", status.Learned, status.Applied)
+	}
+	fmt.Printf("desired: %d\nlast apply: %s\nlast report: %s\n", status.Desired, formatTime(status.LastApply), formatTime(status.LastReport))
 	if status.LastError != "" {
 		fmt.Printf("last error: %s (%s)\n", status.LastError, formatTime(status.LastErrorAt))
 	}

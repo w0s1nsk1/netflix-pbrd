@@ -104,6 +104,24 @@ func TestRuntimeStatusDoesNotRewriteUnchangedSnapshot(t *testing.T) {
 	}
 }
 
+func TestControllerStatusCountsReportedDesiredAsLearned(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	if err := SaveState(state, []string{"45.57.22.134/32"}); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := newRuntime(Config{Role: "controller", StateFile: state, API: APIConfig{Token: testReadToken, ReportToken: testReportToken}}, newFakeRunner())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, err := LoadOperationalStatus(RuntimeStatusFile(state))
+	if err != nil || status.Learned != 1 || status.Applied != 1 {
+		t.Fatalf("status=%+v err=%v", status, err)
+	}
+}
+
 func TestCleanupDeletesOnlyOwnedNFTTable(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "state")
 	runner := newFakeRunner()
