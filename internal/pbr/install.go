@@ -94,7 +94,7 @@ func writeService(layout InstallLayout) error {
 	var body string
 	switch layout.Platform {
 	case "entware":
-		body = "#!/bin/sh\nPIDFILE=/opt/var/run/netflix-pbrd.pid\ncase \"$1\" in\nstart) /bin/start-stop-daemon -S -b -m -p \"$PIDFILE\" -x " + layout.Binary + " -- -config " + layout.Config + ";;\nstop) /bin/start-stop-daemon -K -p \"$PIDFILE\" || true; rm -f \"$PIDFILE\";;\nrestart) $0 stop; $0 start;;\nesac\n"
+		body = "#!/bin/sh\nPIDFILE=/opt/var/run/netflix-pbrd.pid\ncase \"$1\" in\nstart) /bin/start-stop-daemon -S -b -m -p \"$PIDFILE\" -x " + layout.Binary + " -- -config " + layout.Config + ";;\nstop) /bin/start-stop-daemon -K -p \"$PIDFILE\" -x " + layout.Binary + " || true; rm -f \"$PIDFILE\";;\nrestart) $0 stop; $0 start;;\nesac\n"
 	case "openwrt":
 		body = "#!/bin/sh /etc/rc.common\nSTART=95\nUSE_PROCD=1\nstart_service() {\n  procd_open_instance\n  procd_set_param command " + layout.Binary + " -config " + layout.Config + "\n  procd_set_param respawn 3600 5 5\n  procd_set_param stdout 1\n  procd_set_param stderr 1\n  procd_close_instance\n}\n"
 	default:

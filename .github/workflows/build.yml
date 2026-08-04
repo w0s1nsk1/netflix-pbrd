@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
@@ -12,13 +15,51 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-      - run: sh -n configs/*.sh integration/*.sh
+      - run: sh -n configs/*.sh integration/*.sh scripts/package.sh
       - run: go vet ./...
       - run: go test -race ./...
       - run: make build VERSION=${GITHUB_SHA::12}
       - run: sudo apt-get update && sudo apt-get install -y nftables
       - run: sudo ./integration/nft-exit.sh ./dist/netflix-pbrd-linux-amd64
+      - name: Build packages
+        run: |
+          package_version="${GITHUB_SHA::12}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then package_version="${GITHUB_REF_NAME#v}"; fi
+          make package VERSION="$package_version"
+      - name: Validate package archives
+        run: |
+          set -eu
+          for package in dist/packages/*.deb; do dpkg-deb --info "$package" >/dev/null; done
+          for package in dist/packages/*.ipk; do ar t "$package" | grep -q '^control.tar.gz$'; done
+          for package in dist/packages/*.apk; do tar -tzf "$package" >/dev/null; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/packages/
       - uses: actions/upload-artifact@v4
         with:
           name: linux-static-binaries
-          path: dist/
+          path: |
+            dist/netflix-pbrd-linux-amd64
+            dist/netflix-pbrd-linux-arm64
+            dist/netflix-pbrd-linux-armv7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-static-binaries
+          path: release-assets
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/**
+          generate_release_notes: true

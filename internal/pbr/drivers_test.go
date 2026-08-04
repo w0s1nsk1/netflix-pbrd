@@ -149,6 +149,18 @@ func TestEnsureIPRuleFallsBackWhenJSONIsUnsupported(t *testing.T) {
 	}
 }
 
+func TestEnsureIPRuleFallbackRejectsAdditionalSelector(t *testing.T) {
+	runner := newFakeRunner()
+	runner.failures[commandKey("ip", "-j", "rule", "show")] = 1
+	runner.outputs[commandKey("ip", "rule", "show")] = "12020: from 192.0.2.0/24 fwmark 0x20000000/0xff000000 lookup 202\n"
+	if err := ensureIPRule(runner, "12020", "0x20000000", "0xff000000", "202"); err == nil {
+		t.Fatal("expected conflicting text rule to be rejected")
+	}
+	if strings.Contains(runner.commandLines(), "ip rule del") || strings.Contains(runner.commandLines(), "ip rule add") {
+		t.Fatalf("conflicting text rule was modified:\n%s", runner.commandLines())
+	}
+}
+
 func TestWGRouteAndOpenWrtDriversGenerateCommands(t *testing.T) {
 	wg := newFakeRunner()
 	if err := applyWGRoute(wg, ApplyConfig{Interface: "wg0", Peer: "peer"}, []string{"45.57.22.134/32"}); err != nil {

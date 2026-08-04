@@ -7,12 +7,12 @@ case "$1" in
 		/bin/start-stop-daemon -S -b -m -p "$PIDFILE" -x /opt/sbin/netflix-pbrd -- -config /opt/etc/netflix-pbrd.json
 		;;
 	restart|reconfigure)
-		/bin/start-stop-daemon -K -p "$PIDFILE" >/dev/null 2>&1 || true
+		/bin/start-stop-daemon -K -p "$PIDFILE" -x /opt/sbin/netflix-pbrd >/dev/null 2>&1 || true
 		rm -f "$PIDFILE"
 		/bin/start-stop-daemon -S -b -m -p "$PIDFILE" -x /opt/sbin/netflix-pbrd -- -config /opt/etc/netflix-pbrd.json
 		;;
   stop|kill)
-		/bin/start-stop-daemon -K -p "$PIDFILE" || true
+		/bin/start-stop-daemon -K -p "$PIDFILE" -x /opt/sbin/netflix-pbrd || true
 		rm -f "$PIDFILE"
     ;;
 esac

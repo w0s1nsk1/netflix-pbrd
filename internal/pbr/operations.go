@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -38,7 +39,10 @@ func Doctor(ctx context.Context, config Config, runner CommandRunner) []CheckRes
 			checks = append(checks, commandCheck(runner, "nft table", "nft", "list", "table", "inet", chain))
 		case "linux-edge":
 			withEdgeDefaults(&apply)
-			checks = append(checks, commandCheck(runner, "ip rule", "ip", "rule", "show"))
+			exact, ruleErr := inspectIPRule(runner, apply.RulePriority, apply.Mark, apply.Mask, apply.Table)
+			checks = append(checks, CheckResult{Name: "owned ip rule", OK: ruleErr == nil && exact == 1, Detail: fmt.Sprintf("%d exact rule(s): %v", exact, ruleErr)})
+			hook := []string{"-t", "mangle", "-C", "PREROUTING", "-i", apply.InputInterface, "-s", apply.SourceNet, "-j", apply.Chain}
+			checks = append(checks, commandCheck(runner, "PREROUTING hook", "iptables", hook...))
 			checks = append(checks, commandCheck(runner, "iptables chain", "iptables", "-t", "mangle", "-S", apply.Chain))
 		case "linux-exit":
 			checks = append(checks, commandCheck(runner, "iptables", "iptables", "-S"))
@@ -46,6 +50,10 @@ func Doctor(ctx context.Context, config Config, runner CommandRunner) []CheckRes
 		state, stateErr := LoadState(config.StateFile)
 		if stateErr == nil && len(state) > 0 && (apply.Driver == "linux-edge" || apply.Driver == "wg-route") {
 			address := strings.SplitN(state[0], "/", 2)[0]
+			if apply.Driver == "linux-edge" {
+				out, chainErr := runner.Output("iptables", "-t", "mangle", "-S", apply.Chain)
+				checks = append(checks, CheckResult{Name: "learned destination rule", OK: chainErr == nil && containsDestinationRule(string(out), address), Detail: detail(chainErr, address)})
+			}
 			args := []string{"route", "get", address}
 			if apply.Driver == "linux-edge" {
 				withEdgeDefaults(&apply)
@@ -78,6 +86,18 @@ func Doctor(ctx context.Context, config Config, runner CommandRunner) []CheckRes
 		}
 	}
 	return checks
+}
+
+func containsDestinationRule(output, address string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		for i := 0; i+1 < len(fields); i++ {
+			if fields[i] == "-d" && strings.TrimSuffix(fields[i+1], "/32") == address {
+				return strings.Contains(line, "-j MARK")
+			}
+		}
+	}
+	return false
 }
 
 func apiCheck(ctx context.Context, url, token string) CheckResult {
@@ -226,7 +246,11 @@ func Cleanup(config Config, runner CommandRunner) error {
 			if apply.Chain == "" {
 				apply.Chain = "netflix_exit"
 			}
-			if succeeds(runner, "nft", "list", "table", "inet", apply.Chain) {
+			present, err := cleanupProbe(runner, "nft", "list", "table", "inet", apply.Chain)
+			if err != nil {
+				return err
+			}
+			if present {
 				if err := runner.Run("nft", "delete", "table", "inet", apply.Chain); err != nil {
 					return err
 				}
@@ -236,17 +260,36 @@ func Cleanup(config Config, runner CommandRunner) error {
 				return err
 			}
 			for _, network := range state {
-				_ = runner.Run("ip", "route", "del", network, "dev", apply.Interface)
+				out, err := runner.Output("ip", "route", "show", network)
+				if err != nil {
+					return err
+				}
+				if strings.TrimSpace(string(out)) != "" {
+					if err := runner.Run("ip", "route", "del", network, "dev", apply.Interface); err != nil {
+						if isMissingError(err) {
+							continue
+						}
+						return err
+					}
+				}
 			}
 		case "linux-edge":
 			withEdgeDefaults(&apply)
 			hook := []string{"-t", "mangle", "-C", "PREROUTING", "-i", apply.InputInterface, "-s", apply.SourceNet, "-j", apply.Chain}
-			if succeeds(runner, "iptables", hook...) {
+			present, err := cleanupProbe(runner, "iptables", hook...)
+			if err != nil {
+				return err
+			}
+			if present {
 				if err := runner.Run("iptables", "-t", "mangle", "-D", "PREROUTING", "-i", apply.InputInterface, "-s", apply.SourceNet, "-j", apply.Chain); err != nil {
 					return err
 				}
 			}
-			if succeeds(runner, "iptables", "-t", "mangle", "-S", apply.Chain) {
+			present, err = cleanupProbe(runner, "iptables", "-t", "mangle", "-S", apply.Chain)
+			if err != nil {
+				return err
+			}
+			if present {
 				if err := runner.Run("iptables", "-t", "mangle", "-F", apply.Chain); err != nil {
 					return err
 				}
@@ -254,12 +297,14 @@ func Cleanup(config Config, runner CommandRunner) error {
 					return err
 				}
 			}
-			if out, err := runner.Output("ip", "rule", "show"); err == nil && strings.Contains(string(out), apply.RulePriority+":") && strings.Contains(string(out), "fwmark "+apply.Mark+"/"+apply.Mask) && strings.Contains(string(out), "lookup "+apply.Table) {
-				if err := runner.Run("ip", "rule", "del", "pref", apply.RulePriority, "fwmark", apply.Mark+"/"+apply.Mask, "lookup", apply.Table); err != nil {
-					return err
-				}
+			if err := deleteOwnedIPRule(runner, apply.RulePriority, apply.Mark, apply.Mask, apply.Table); err != nil {
+				return err
 			}
-			if out, err := runner.Output("ip", "route", "show", "table", apply.Table); err == nil && strings.Contains(string(out), "default") {
+			out, err := runner.Output("ip", "route", "show", "table", apply.Table)
+			if err != nil {
+				return err
+			}
+			if strings.Contains(string(out), "default") {
 				if err := runner.Run("ip", "route", "del", "default", "table", apply.Table); err != nil {
 					return err
 				}
@@ -268,34 +313,104 @@ func Cleanup(config Config, runner CommandRunner) error {
 				return err
 			}
 		case "linux-exit":
-			cleanupLinuxExit(runner, apply)
+			if err := cleanupLinuxExit(runner, apply); err != nil {
+				return err
+			}
 		case "openwrt-pbr":
-			_ = runner.Run("uci", "-q", "delete", "pbr."+apply.PBRSection+".dest_addr")
-			_ = runner.Run("uci", "-q", "delete", "firewall."+apply.FirewallSection+".dest_ip")
+			if err := runAllowMissing(runner, "uci", "-q", "delete", "pbr."+apply.PBRSection+".dest_addr"); err != nil {
+				return err
+			}
+			if err := runAllowMissing(runner, "uci", "-q", "delete", "firewall."+apply.FirewallSection+".dest_ip"); err != nil {
+				return err
+			}
 			if err := runner.Run("uci", "commit", "pbr"); err != nil {
 				return err
 			}
 			if err := runner.Run("uci", "commit", "firewall"); err != nil {
 				return err
 			}
-			_ = runner.Run("/etc/init.d/firewall", "reload")
-			_ = runner.Run("/etc/init.d/pbr", "reload")
+			if err := runner.Run("/etc/init.d/firewall", "reload"); err != nil {
+				return err
+			}
+			if err := runner.Run("/etc/init.d/pbr", "reload"); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func cleanupLinuxExit(runner CommandRunner, apply ApplyConfig) {
+func cleanupLinuxExit(runner CommandRunner, apply ApplyConfig) error {
 	if apply.Chain == "" {
 		apply.Chain = "STREAM_EXIT"
 	}
 	natChain := apply.Chain + "_NAT"
-	_ = runner.Run("iptables", "-D", "FORWARD", "-j", apply.Chain)
-	_ = runner.Run("iptables", "-t", "nat", "-D", "POSTROUTING", "-j", natChain)
-	_ = runner.Run("iptables", "-F", apply.Chain)
-	_ = runner.Run("iptables", "-X", apply.Chain)
-	_ = runner.Run("iptables", "-t", "nat", "-F", natChain)
-	_ = runner.Run("iptables", "-t", "nat", "-X", natChain)
+	if present, err := cleanupProbe(runner, "iptables", "-C", "FORWARD", "-j", apply.Chain); err != nil {
+		return err
+	} else if present {
+		if err := runner.Run("iptables", "-D", "FORWARD", "-j", apply.Chain); err != nil {
+			return err
+		}
+	}
+	if present, err := cleanupProbe(runner, "iptables", "-t", "nat", "-C", "POSTROUTING", "-j", natChain); err != nil {
+		return err
+	} else if present {
+		if err := runner.Run("iptables", "-t", "nat", "-D", "POSTROUTING", "-j", natChain); err != nil {
+			return err
+		}
+	}
+	if present, err := cleanupProbe(runner, "iptables", "-S", apply.Chain); err != nil {
+		return err
+	} else if present {
+		if err := runner.Run("iptables", "-F", apply.Chain); err != nil {
+			return err
+		}
+		if err := runner.Run("iptables", "-X", apply.Chain); err != nil {
+			return err
+		}
+	}
+	if present, err := cleanupProbe(runner, "iptables", "-t", "nat", "-S", natChain); err != nil {
+		return err
+	} else if present {
+		if err := runner.Run("iptables", "-t", "nat", "-F", natChain); err != nil {
+			return err
+		}
+		if err := runner.Run("iptables", "-t", "nat", "-X", natChain); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isMissingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, part := range []string{"bad rule", "no chain", "does not exist", "no such file", "entry not found", "cannot find rule", "cannot find device"} {
+		if strings.Contains(s, part) {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanupProbe(runner CommandRunner, name string, args ...string) (bool, error) {
+	if err := runner.Run(name, args...); err != nil {
+		if isMissingError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func runAllowMissing(runner CommandRunner, name string, args ...string) error {
+	err := runner.Run(name, args...)
+	if err != nil && !isMissingError(err) {
+		return err
+	}
+	return nil
 }
 
 func Uninstall(configPath string, purge bool, runner CommandRunner) (InstallLayout, error) {
@@ -313,16 +428,23 @@ func Uninstall(configPath string, purge bool, runner CommandRunner) (InstallLayo
 	if err := Cleanup(config, runner); err != nil {
 		return layout, err
 	}
-	_ = os.Remove(layout.Service)
-	_ = os.Remove(layout.Binary)
+	if err := removeIfPresent(layout.Service); err != nil {
+		return layout, err
+	}
+	if err := removeIfPresent(layout.Binary); err != nil {
+		return layout, err
+	}
 	if layout.Platform == "systemd" {
-		_ = runner.Run("systemctl", "daemon-reload")
+		if err := runner.Run("systemctl", "daemon-reload"); err != nil {
+			return layout, err
+		}
 	}
 	if purge {
-		_ = os.Remove(layout.Config)
-		_ = os.Remove(config.StateFile)
-		_ = os.Remove(learnedStateFile(config.StateFile))
-		_ = os.Remove(RuntimeStatusFile(config.StateFile))
+		for _, path := range []string{layout.Config, config.StateFile, learnedStateFile(config.StateFile), RuntimeStatusFile(config.StateFile)} {
+			if err := removeIfPresent(path); err != nil {
+				return layout, err
+			}
+		}
 	}
 	return layout, nil
 }
@@ -335,12 +457,17 @@ func stopService(layout InstallLayout, config Config, runner CommandRunner) erro
 		}
 		return runner.Run("systemctl", "daemon-reload")
 	case "openwrt":
-		_ = runner.Run(layout.Service, "disable")
+		if err := runner.Run(layout.Service, "disable"); err != nil {
+			return err
+		}
 		return runner.Run(layout.Service, "stop")
 	default:
 		status, err := LoadOperationalStatus(RuntimeStatusFile(config.StateFile))
 		if err != nil || status.PID <= 1 || status.PID == os.Getpid() {
 			return fmt.Errorf("cannot identify Entware daemon PID safely; run %s stop first", layout.Service)
+		}
+		if err := verifyProcessExecutable(status.PID, layout.Binary); err != nil {
+			return err
 		}
 		if err := syscall.Kill(status.PID, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
 			return err
@@ -354,6 +481,32 @@ func stopService(layout InstallLayout, config Config, runner CommandRunner) erro
 		}
 		return fmt.Errorf("Entware daemon PID %d did not stop", status.PID)
 	}
+}
+
+func removeIfPresent(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func verifyProcessExecutable(pid int, expected string) error {
+	actual, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return fmt.Errorf("cannot verify Entware daemon PID %d: %v", pid, err)
+	}
+	want, err := filepath.EvalSymlinks(expected)
+	if err != nil {
+		return fmt.Errorf("cannot verify daemon executable %q: %v", expected, err)
+	}
+	got, err := filepath.EvalSymlinks(actual)
+	if err != nil {
+		return fmt.Errorf("cannot verify daemon executable %q: %v", actual, err)
+	}
+	if got != want {
+		return fmt.Errorf("PID %d belongs to %q, expected %q", pid, got, want)
+	}
+	return nil
 }
 
 func ResolveHostPort(address string) string {

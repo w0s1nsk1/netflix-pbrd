@@ -131,6 +131,11 @@ make build VERSION=v0.1.0
 
 Artifacts are written to `dist/`.
 
+CI also builds `.deb`, `.apk`, and `.ipk` packages for amd64, arm64, and armv7.
+Tagging a release such as `v0.1.0` publishes the packages and static binaries
+to GitHub Releases. The packages install the binary and service integration;
+the JSON configuration remains an explicit operator-owned file.
+
 ## Advanced configuration
 
 Choose and adapt one of the files in [`configs/`](configs/):

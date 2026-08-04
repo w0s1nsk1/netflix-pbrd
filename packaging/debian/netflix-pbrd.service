@@ -1,0 +1,14 @@
+[Unit]
+Description=Netflix policy-based routing daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/netflix-pbrd -config /etc/netflix-pbrd.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

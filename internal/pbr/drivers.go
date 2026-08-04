@@ -96,17 +96,36 @@ func allowed(c ApplyConfig, nets []string) string {
 }
 
 func ensureIPRule(runner CommandRunner, priority, mark, mask, table string) error {
-	out, err := runner.Output("ip", "-j", "rule", "show")
-	if err == nil {
-		return ensureIPRuleJSON(runner, out, priority, mark, mask, table)
+	exact, err := inspectIPRule(runner, priority, mark, mask, table)
+	if err != nil {
+		return err
 	}
-	return ensureIPRuleText(runner, priority, mark, mask, table)
+	return ensureIPRuleCount(runner, exact, priority, mark, mask, table)
 }
 
 func ensureIPRuleJSON(runner CommandRunner, out []byte, priority, mark, mask, table string) error {
+	exact, err := scanIPRuleJSON(out, priority, mark, mask, table)
+	if err != nil {
+		return err
+	}
+	return ensureIPRuleCount(runner, exact, priority, mark, mask, table)
+}
+
+func inspectIPRule(runner CommandRunner, priority, mark, mask, table string) (int, error) {
+	out, err := runner.Output("ip", "-j", "rule", "show")
+	if err == nil {
+		exact, jsonErr := scanIPRuleJSON(out, priority, mark, mask, table)
+		if jsonErr == nil || !strings.HasPrefix(jsonErr.Error(), "parse ip -j rule show:") {
+			return exact, jsonErr
+		}
+	}
+	return scanIPRuleText(runner, priority, mark, mask, table)
+}
+
+func scanIPRuleJSON(out []byte, priority, mark, mask, table string) (int, error) {
 	var rules []map[string]json.RawMessage
 	if err := json.Unmarshal(out, &rules); err != nil {
-		return fmt.Errorf("parse ip -j rule show: %v", err)
+		return 0, fmt.Errorf("parse ip -j rule show: %v", err)
 	}
 	wantPriority, _ := strconv.Atoi(priority)
 	wantMark, _ := strconv.ParseUint(mark, 0, 32)
@@ -117,7 +136,7 @@ func ensureIPRuleJSON(runner CommandRunner, out []byte, priority, mark, mask, ta
 			continue
 		}
 		if !onlyExpectedIPRuleFields(rule) || !neutralRuleSelector(rule["src"]) || !neutralRuleSelector(rule["dst"]) || !neutralRuleProtocol(rule["protocol"]) {
-			return fmt.Errorf("ip rule priority %s is already owned by another rule", priority)
+			return 0, fmt.Errorf("ip rule priority %s is already owned by another rule", priority)
 		}
 		ruleMark, markErr := strconv.ParseUint(rawString(rule["fwmark"]), 0, 32)
 		ruleMask := uint64(0xffffffff)
@@ -129,9 +148,9 @@ func ensureIPRuleJSON(runner CommandRunner, out []byte, priority, mark, mask, ta
 			exact++
 			continue
 		}
-		return fmt.Errorf("ip rule priority %s is already owned by another rule", priority)
+		return 0, fmt.Errorf("ip rule priority %s is already owned by another rule", priority)
 	}
-	return ensureIPRuleCount(runner, exact, priority, mark, mask, table)
+	return exact, nil
 }
 
 func onlyExpectedIPRuleFields(rule map[string]json.RawMessage) bool {
@@ -172,24 +191,32 @@ func rawInt(value json.RawMessage) int {
 }
 
 func ensureIPRuleText(runner CommandRunner, priority, mark, mask, table string) error {
-	out, err := runner.Output("ip", "rule", "show")
+	exact, err := scanIPRuleText(runner, priority, mark, mask, table)
 	if err != nil {
 		return err
 	}
-	prefix := priority + ":"
+	return ensureIPRuleCount(runner, exact, priority, mark, mask, table)
+}
+
+func scanIPRuleText(runner CommandRunner, priority, mark, mask, table string) (int, error) {
+	out, err := runner.Output("ip", "rule", "show")
+	if err != nil {
+		return 0, err
+	}
+	expected := []string{"from", "all", "fwmark", mark + "/" + mask, "lookup", table}
 	exact := 0
 	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, prefix) {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || strings.TrimSuffix(fields[0], ":") != priority {
 			continue
 		}
-		if strings.Contains(line, "fwmark "+mark+"/"+mask) && strings.Contains(line, "lookup "+table) {
+		if Equal(fields[1:], expected) {
 			exact++
 			continue
 		}
-		return fmt.Errorf("ip rule priority %s is already owned by another rule: %s", priority, line)
+		return 0, fmt.Errorf("ip rule priority %s is already owned by another rule: %s", priority, strings.TrimSpace(line))
 	}
-	return ensureIPRuleCount(runner, exact, priority, mark, mask, table)
+	return exact, nil
 }
 
 func ensureIPRuleCount(runner CommandRunner, exact int, priority, mark, mask, table string) error {
@@ -203,6 +230,20 @@ func ensureIPRuleCount(runner CommandRunner, exact int, priority, mark, mask, ta
 		}
 	}
 	return runner.Run("ip", "rule", "add", "pref", priority, "fwmark", mark+"/"+mask, "lookup", table)
+}
+
+func deleteOwnedIPRule(runner CommandRunner, priority, mark, mask, table string) error {
+	exact, err := inspectIPRule(runner, priority, mark, mask, table)
+	if err != nil {
+		return err
+	}
+	args := []string{"rule", "del", "pref", priority, "fwmark", mark + "/" + mask, "lookup", table}
+	for i := 0; i < exact; i++ {
+		if err := runner.Run("ip", args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func applyWGRoute(runner CommandRunner, c ApplyConfig, nets []string) error {

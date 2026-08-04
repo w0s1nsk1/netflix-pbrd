@@ -1,0 +1,10 @@
+#!/sbin/openrc-run
+
+name="netflix-pbrd"
+command="/usr/bin/netflix-pbrd"
+command_args="-config /etc/netflix-pbrd.json"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+depend() {
+	need net
+}

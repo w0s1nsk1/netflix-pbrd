@@ -153,6 +153,39 @@ func TestCleanupLinuxEdgeAvoidsMainTableFlush(t *testing.T) {
 	}
 }
 
+func TestCleanupPropagatesLinuxExitErrors(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	runner := newFakeRunner()
+	runner.failures[commandKey("iptables", "-D", "FORWARD", "-j", "STREAM_EXIT")] = 1
+	config := Config{StateFile: state, Apply: []ApplyConfig{{Driver: "linux-exit", Chain: "STREAM_EXIT"}}}
+	if err := Cleanup(config, runner); err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+}
+
+func TestCleanupPropagatesOpenWrtReloadErrors(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	runner := newFakeRunner()
+	runner.failures[commandKey("/etc/init.d/pbr", "reload")] = 1
+	config := Config{StateFile: state, Apply: []ApplyConfig{{Driver: "openwrt-pbr", PBRSection: "policy", FirewallSection: "rule"}}}
+	if err := Cleanup(config, runner); err == nil {
+		t.Fatal("expected OpenWrt reload failure")
+	}
+}
+
+func TestVerifyProcessExecutableRejectsDifferentProcess(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyProcessExecutable(os.Getpid(), "/bin/sh"); err == nil {
+		t.Fatal("expected executable ownership check to reject this process")
+	}
+	if err := verifyProcessExecutable(os.Getpid(), executable); err != nil {
+		t.Fatalf("current process should match itself: %v", err)
+	}
+}
+
 func TestSmokeTestResolvesAndConfirmsPolicyRoute(t *testing.T) {
 	packet, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
