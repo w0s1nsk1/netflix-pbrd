@@ -57,8 +57,11 @@ this daemon manages only destination policy, routes, and firewall rules.
   rotation and process restarts.
 - Authenticated agent reports merge edge history back into the controller, so
   every hop converges on the same destination set.
-- Changes are applied only when the network set changes.
-- Bearer-token authentication with constant-time token comparison.
+- Desired, applied, and last-reported state are tracked separately. Failed
+  applies and reports are retried without requiring a DNS change.
+- Separate read and report bearer tokens with constant-time comparison.
+- Agent reports accept public IPv4 `/32` hosts only. Broader trusted prefixes
+  are limited to `/24` or narrower, and `max_networks` defaults to 4096.
 - TLS required by default for a listening API. Plain HTTP must be explicitly
   enabled and should only be used on a private WireGuard address.
 - Drivers for WireGuard transit routing, Linux edge PBR, OpenWrt PBR, and a
@@ -85,9 +88,10 @@ Choose and adapt one of the files in [`configs/`](configs/):
 - `public-server.example.json`
 - `public-client.example.json`
 
-Generate a control-plane token with at least 32 random bytes:
+Generate separate read and report tokens with at least 32 random bytes each:
 
 ```sh
+openssl rand -hex 32
 openssl rand -hex 32
 ```
 
@@ -118,10 +122,14 @@ procd service from `packaging/openwrt/`, and enable it through `/etc/init.d`.
 For Entware on an ARMv7 gateway, install the binary as
 `/opt/sbin/netflix-pbrd`, the configuration under `/opt/etc/`, and use the
 startup scripts in `packaging/entware/`. `S47wg-relay` is an example inner
-WireGuard interface setup; replace its public key and endpoint before use.
+WireGuard interface setup. Copy `netflix-pbr-relay.conf.example` to
+`/opt/etc/netflix-pbr-relay.conf` and replace every placeholder. DNS redirection
+is deployment-specific and intentionally not managed by these scripts.
 
 `linux-edge.next_hop` is optional. Omit it for a point-to-point WireGuard
-interface so routes are installed directly with `dev <interface>`.
+interface so routes are installed directly with `dev <interface>`. The driver
+installs only a default route in its dedicated policy table; destination
+selection remains scoped to `source_net` by the mangle mark and `ip rule`.
 
 ## Public server requirements
 
@@ -131,8 +139,11 @@ interface so routes are installed directly with `dev <interface>`.
   possible.
 - The `linux-exit` source network must match the WireGuard client subnet.
 
-The exit driver only permits and NATs destinations in the synchronized set. It
-does not turn the host into an unrestricted VPN gateway.
+The exit driver inserts an early forwarding chain, accepts established replies
+and synchronized destinations, then drops every other forwarded packet from
+`source_net`. Its NAT chain masquerades only synchronized destinations. This
+fail-closed behavior prevents a permissive base firewall from turning the host
+into an unrestricted VPN gateway.
 
 ## Operational notes
 

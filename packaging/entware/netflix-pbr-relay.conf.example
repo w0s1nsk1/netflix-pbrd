@@ -1,0 +1,17 @@
+# Copy to /opt/etc/netflix-pbr-relay.conf and replace every placeholder.
+RELAY_INTERFACE=wg-relay
+RELAY_KEY_FILE=/opt/etc/wireguard/netflix-relay.key
+RELAY_PEER_PUBLIC_KEY=REPLACE_WITH_RELAY_PUBLIC_KEY
+RELAY_ENDPOINT=REPLACE_WITH_OUTER_WIREGUARD_ENDPOINT
+RELAY_ADDRESS=REPLACE_WITH_INNER_TUNNEL_CIDR
+RELAY_ALLOWED_IPS=0.0.0.0/0
+RELAY_MTU=1340
+RELAY_KEEPALIVE=25
+EDGE_TABLE=202
+
+# Optional platform-specific INPUT exception.
+INPUT_CHAIN=
+INPUT_PEER_SOURCE=
+
+# Optional outer tunnel brought up by user-autorun.sh.
+OUTER_WG_QUICK_CONFIG=

@@ -1,25 +1,20 @@
 #!/bin/sh
 
 PATH=/opt/sbin:/opt/bin:/system/bin:/system/xbin:/sbin:/bin
+CONFIG=${NETFLIX_PBR_RELAY_CONFIG:-/opt/etc/netflix-pbr-relay.conf}
+[ -r "$CONFIG" ] || exit 1
+. "$CONFIG"
 
-dns_rules_ready() {
-	for src in 192.168.8.197 192.168.8.230; do
-		for proto in udp tcp; do
-			iptables -t nat -C PRE_REDIRECT -i br+ -s "$src" -p "$proto" --dport 53 \
-				-j DNAT --to-destination 10.8.0.1:53 >/dev/null 2>&1 || return 1
-		done
-	done
-}
+: "${RELAY_INTERFACE:?RELAY_INTERFACE is required}"
+EDGE_TABLE=${EDGE_TABLE:-202}
 
-dns_rules_ready || /opt/etc/init.d/S46dns-redirect-1921688230 start
-
-if ! ip link show wg-relay >/dev/null 2>&1; then
-	/opt/etc/init.d/S47wg-relay start
+if ! ip link show "$RELAY_INTERFACE" >/dev/null 2>&1; then
+	/opt/etc/init.d/S47wg-relay start || exit 1
 fi
 
 if ! /opt/bin/busybox pidof netflix-pbrd >/dev/null 2>&1; then
 	/opt/etc/init.d/S48netflix-pbrd start
-elif ! ip route show table 202 | grep -q '^default dev wg-relay'; then
+elif ! ip route show table "$EDGE_TABLE" | grep -q "^default .* dev $RELAY_INTERFACE"; then
 	for pid in $(/opt/bin/busybox pidof netflix-pbrd); do
 		kill "$pid"
 	done

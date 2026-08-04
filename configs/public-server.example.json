@@ -5,6 +5,7 @@
   "api": {
     "listen": ":18443",
     "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN",
+    "report_token": "REPLACE_WITH_A_DIFFERENT_LONG_REPORT_TOKEN",
     "tls_cert": "/etc/letsencrypt/live/vpn.example.com/fullchain.pem",
     "tls_key": "/etc/letsencrypt/live/vpn.example.com/privkey.pem"
   },

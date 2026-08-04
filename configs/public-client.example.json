@@ -4,7 +4,8 @@
   "state_file": "/var/lib/netflix-pbrd/networks.state",
   "api": {
     "source_url": "https://vpn.example.com:18443/v1/networks",
-    "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN"
+    "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN",
+    "report_token": "REPLACE_WITH_A_DIFFERENT_LONG_REPORT_TOKEN"
   },
   "apply": [{
     "driver": "linux-edge",

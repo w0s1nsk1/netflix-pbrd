@@ -4,8 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/url"
+	"regexp"
+	"strconv"
 	"time"
+)
+
+var (
+	interfacePattern  = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
+	identifierPattern = regexp.MustCompile(`^[A-Za-z0-9_@.\[\]-]+$`)
+	chainPattern      = regexp.MustCompile(`^[A-Za-z0-9_]{1,20}$`)
+	hexPattern        = regexp.MustCompile(`^0x[0-9A-Fa-f]{1,8}$`)
 )
 
 type Config struct {
@@ -16,12 +26,14 @@ type Config struct {
 	API          APIConfig     `json:"api"`
 	Discovery    Discovery     `json:"discovery"`
 	Apply        []ApplyConfig `json:"apply"`
+	MaxNetworks  int           `json:"max_networks"`
 }
 
 type APIConfig struct {
 	Listen            string `json:"listen"`
 	SourceURL         string `json:"source_url"`
 	Token             string `json:"token"`
+	ReportToken       string `json:"report_token"`
 	TLSCert           string `json:"tls_cert"`
 	TLSKey            string `json:"tls_key"`
 	AllowInsecureHTTP bool   `json:"allow_insecure_http"`
@@ -85,6 +97,21 @@ func LoadConfig(path string) (Config, error) {
 	if len(c.API.Token) < 32 {
 		return c, fmt.Errorf("api.token must contain at least 32 characters")
 	}
+	if len(c.API.ReportToken) < 32 {
+		return c, fmt.Errorf("api.report_token must contain at least 32 characters")
+	}
+	if c.API.ReportToken == c.API.Token {
+		return c, fmt.Errorf("api.report_token must differ from api.token")
+	}
+	if c.MaxNetworks == 0 {
+		c.MaxNetworks = DefaultMaxNetworks
+	}
+	if c.MaxNetworks < 1 || c.MaxNetworks > 65535 {
+		return c, fmt.Errorf("max_networks must be between 1 and 65535")
+	}
+	if _, err := ValidateNetworks(c.SeedNetworks, false, c.MaxNetworks); err != nil {
+		return c, fmt.Errorf("seed_networks: %v", err)
+	}
 	if c.Role == "controller" && c.API.Listen == "" {
 		return c, fmt.Errorf("controller requires api.listen")
 	}
@@ -92,6 +119,41 @@ func LoadConfig(path string) (Config, error) {
 		return c, fmt.Errorf("TLS is required unless allow_insecure_http is true")
 	}
 	for _, apply := range c.Apply {
+		if apply.Interface != "" && !interfacePattern.MatchString(apply.Interface) {
+			return c, fmt.Errorf("invalid interface %q", apply.Interface)
+		}
+		if apply.WANInterface != "" && !interfacePattern.MatchString(apply.WANInterface) {
+			return c, fmt.Errorf("invalid wan_interface %q", apply.WANInterface)
+		}
+		if apply.Chain != "" && !chainPattern.MatchString(apply.Chain) {
+			return c, fmt.Errorf("invalid chain %q", apply.Chain)
+		}
+		if apply.Table != "" && !identifierPattern.MatchString(apply.Table) {
+			return c, fmt.Errorf("invalid table %q", apply.Table)
+		}
+		if apply.RulePriority != "" {
+			priority, err := strconv.Atoi(apply.RulePriority)
+			if err != nil || priority < 1 || priority > 32765 {
+				return c, fmt.Errorf("invalid rule_priority %q", apply.RulePriority)
+			}
+		}
+		if apply.Mark != "" && !hexPattern.MatchString(apply.Mark) {
+			return c, fmt.Errorf("invalid mark %q", apply.Mark)
+		}
+		if apply.Mask != "" && !hexPattern.MatchString(apply.Mask) {
+			return c, fmt.Errorf("invalid mask %q", apply.Mask)
+		}
+		if apply.NextHop != "" && (net.ParseIP(apply.NextHop) == nil || net.ParseIP(apply.NextHop).To4() == nil) {
+			return c, fmt.Errorf("invalid next_hop %q", apply.NextHop)
+		}
+		if apply.SourceNet != "" && !validIPv4CIDR(apply.SourceNet) {
+			return c, fmt.Errorf("invalid source_net %q", apply.SourceNet)
+		}
+		for _, network := range apply.BaseAllowed {
+			if !validIPv4CIDR(network) {
+				return c, fmt.Errorf("invalid base_allowed network %q", network)
+			}
+		}
 		switch apply.Driver {
 		case "wg-route":
 			if apply.Interface == "" || apply.Peer == "" {
@@ -102,7 +164,7 @@ func LoadConfig(path string) (Config, error) {
 				return c, fmt.Errorf("linux-edge requires interface, peer, and source_net")
 			}
 		case "openwrt-pbr":
-			if apply.PBRSection == "" || apply.FirewallSection == "" {
+			if apply.PBRSection == "" || apply.FirewallSection == "" || !identifierPattern.MatchString(apply.PBRSection) || !identifierPattern.MatchString(apply.FirewallSection) {
 				return c, fmt.Errorf("openwrt-pbr requires pbr_section and firewall_section")
 			}
 		case "linux-exit":
@@ -114,6 +176,11 @@ func LoadConfig(path string) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+func validIPv4CIDR(value string) bool {
+	ip, _, err := net.ParseCIDR(value)
+	return err == nil && ip.To4() != nil
 }
 
 func (c Config) PollInterval() (time.Duration, error) {

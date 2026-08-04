@@ -1,18 +1,12 @@
-#!/system/bin/bash
-
-/system/bin/wg-quick up wg0 >> /opt/wireguard_log.txt
+#!/system/bin/sh
 
 PATH=/opt/bin:/opt/sbin:/system/bin:/system/xbin:$PATH
-ps | grep '[c]rond' >/dev/null 2>&1 || /opt/sbin/crond
+CONFIG=${NETFLIX_PBR_RELAY_CONFIG:-/opt/etc/netflix-pbr-relay.conf}
 
-(
-  attempt=0
-  while [ "$attempt" -lt 60 ]; do
-    if ip link show wg0 >/dev/null 2>&1 && iptables -t nat -S PRE_REDIRECT >/dev/null 2>&1; then
-      break
-    fi
-    attempt=$((attempt + 1))
-    sleep 5
-  done
-  /opt/sbin/netflix-pbr-watchdog
-) >> /opt/netflix-pbr-boot.log 2>&1 &
+if [ -r "$CONFIG" ]; then
+	. "$CONFIG"
+	[ -z "$OUTER_WG_QUICK_CONFIG" ] || /system/bin/wg-quick up "$OUTER_WG_QUICK_CONFIG"
+fi
+
+ps | grep '[c]rond' >/dev/null 2>&1 || /opt/sbin/crond
+/opt/sbin/netflix-pbr-watchdog >> /opt/netflix-pbr-boot.log 2>&1 &
