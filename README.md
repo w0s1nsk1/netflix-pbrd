@@ -154,9 +154,10 @@ selection remains scoped to `source_net` by the mangle mark and `ip rule`.
   possible.
 - The `linux-exit` source network must match the WireGuard client subnet.
 
-The exit driver inserts an early forwarding chain, accepts established replies
-and synchronized destinations, then drops every other forwarded packet from
-`source_net`. Its NAT chain masquerades only synchronized destinations. This
+The exit driver inserts an early forwarding chain, accepts synchronized
+destinations, then drops every other forwarded packet from `source_net`.
+Replies and unrelated traffic return to the base firewall. Its NAT chain
+masquerades only synchronized destinations. This
 fail-closed behavior prevents a permissive base firewall from turning the host
 into an unrestricted VPN gateway.
 

@@ -24,6 +24,9 @@ func TestLinuxExitDropsNonNetflixAndLimitsNAT(t *testing.T) {
 	if strings.Contains(input, "-s 10.66.0.0/24 -o eth0 -j MASQUERADE") {
 		t.Fatalf("found unrestricted masquerade in:\n%s", input)
 	}
+	if strings.Contains(input, "conntrack") {
+		t.Fatalf("exit rules require optional conntrack extension:\n%s", input)
+	}
 }
 
 func TestLinuxExitDoesNotInstallHooksWhenRestoreFails(t *testing.T) {

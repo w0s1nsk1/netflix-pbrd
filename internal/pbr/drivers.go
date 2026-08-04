@@ -195,7 +195,6 @@ func applyExit(runner CommandRunner, c ApplyConfig, nets []string) error {
 	}
 	var restore strings.Builder
 	restore.WriteString("*filter\n-F " + c.Chain + "\n")
-	restore.WriteString("-A " + c.Chain + " -d " + c.SourceNet + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n")
 	for _, network := range nets {
 		restore.WriteString("-A " + c.Chain + " -s " + c.SourceNet + " -d " + network + " -j ACCEPT\n")
 	}
