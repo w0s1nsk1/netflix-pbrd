@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -25,13 +26,19 @@ type Runtime struct {
 	runner       CommandRunner
 	client       *http.Client
 	syncMu       sync.Mutex
+	statusMu     sync.Mutex
 	mu           sync.RWMutex
 	desired      []string
 	learned      []string
 	applied      []string
 	appliedKnown bool
 	appliedAt    time.Time
+	reportedAt   time.Time
 	lastReported []string
+	lastError    string
+	lastErrorAt  time.Time
+	lastStatus   OperationalStatus
+	statusKnown  bool
 	updated      time.Time
 }
 
@@ -81,12 +88,15 @@ func newRuntime(c Config, runner CommandRunner) (*Runtime, error) {
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
+	r.recordStatus("")
 	// Restore durable desired state before depending on DNS or the controller.
 	if err := r.reconcile(ctx); err != nil {
 		log.Printf("initial apply: %v", err)
+		r.recordStatus(err.Error())
 	}
 	if r.config.DNSProxy.Listen != "" {
 		if err := startDNSProxy(ctx, r.config.DNSProxy, r.learn); err != nil {
+			r.recordStatus(err.Error())
 			return err
 		}
 	}
@@ -110,7 +120,12 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Runtime) sync(ctx context.Context) error {
+func (r *Runtime) sync(ctx context.Context) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			r.recordStatus(resultErr.Error())
+		}
+	}()
 	r.syncMu.Lock()
 	defer r.syncMu.Unlock()
 
@@ -146,7 +161,12 @@ func (r *Runtime) sync(ctx context.Context) error {
 	return discoveryErr
 }
 
-func (r *Runtime) learn(ctx context.Context, networks []string) error {
+func (r *Runtime) learn(ctx context.Context, networks []string) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			r.recordStatus(resultErr.Error())
+		}
+	}()
 	r.syncMu.Lock()
 	defer r.syncMu.Unlock()
 
@@ -189,7 +209,12 @@ func (r *Runtime) learn(ctx context.Context, networks []string) error {
 	return r.reconcileLocked(ctx)
 }
 
-func (r *Runtime) reconcile(ctx context.Context) error {
+func (r *Runtime) reconcile(ctx context.Context) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			r.recordStatus(resultErr.Error())
+		}
+	}()
 	r.syncMu.Lock()
 	defer r.syncMu.Unlock()
 	return r.reconcileLocked(ctx)
@@ -230,9 +255,48 @@ func (r *Runtime) reconcileLocked(ctx context.Context) error {
 		}
 		r.mu.Lock()
 		r.lastReported = append([]string(nil), learned...)
+		r.reportedAt = time.Now()
 		r.mu.Unlock()
 	}
+	r.recordStatus("")
 	return nil
+}
+
+func (r *Runtime) recordStatus(lastError string) {
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
+	r.mu.Lock()
+	if lastError != "" {
+		r.lastError = lastError
+		r.lastErrorAt = time.Now().UTC()
+	}
+	status := OperationalStatus{
+		Version:      1,
+		Role:         r.config.Role,
+		PID:          os.Getpid(),
+		Desired:      len(r.desired),
+		Learned:      len(r.learned),
+		Applied:      len(r.applied),
+		Reported:     len(r.lastReported),
+		AppliedKnown: r.appliedKnown,
+		LastApply:    r.appliedAt,
+		LastReport:   r.reportedAt,
+		LastError:    r.lastError,
+		LastErrorAt:  r.lastErrorAt,
+	}
+	r.mu.Unlock()
+	previous := r.lastStatus
+	previous.Updated = time.Time{}
+	if r.statusKnown && previous == status {
+		return
+	}
+	status.Updated = time.Now().UTC()
+	if err := saveOperationalStatus(RuntimeStatusFile(r.config.StateFile), status); err != nil {
+		log.Printf("runtime status: %v", err)
+		return
+	}
+	r.lastStatus = status
+	r.statusKnown = true
 }
 
 func learnedStateFile(stateFile string) string {

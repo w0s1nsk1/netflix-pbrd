@@ -21,50 +21,50 @@ var (
 
 type Config struct {
 	Role            string         `json:"role"`
-	Interval        string         `json:"interval"`
-	ReapplyInterval string         `json:"reapply_interval"`
+	Interval        string         `json:"interval,omitempty"`
+	ReapplyInterval string         `json:"reapply_interval,omitempty"`
 	StateFile       string         `json:"state_file"`
-	SeedNetworks    []string       `json:"seed_networks"`
+	SeedNetworks    []string       `json:"seed_networks,omitempty"`
 	API             APIConfig      `json:"api"`
-	DNSProxy        DNSProxyConfig `json:"dns_proxy"`
-	Apply           []ApplyConfig  `json:"apply"`
-	MaxNetworks     int            `json:"max_networks"`
+	DNSProxy        DNSProxyConfig `json:"dns_proxy,omitempty"`
+	Apply           []ApplyConfig  `json:"apply,omitempty"`
+	MaxNetworks     int            `json:"max_networks,omitempty"`
 }
 
 type APIConfig struct {
-	Listen            string `json:"listen"`
-	SourceURL         string `json:"source_url"`
+	Listen            string `json:"listen,omitempty"`
+	SourceURL         string `json:"source_url,omitempty"`
 	Token             string `json:"token"`
 	ReportToken       string `json:"report_token"`
-	TLSCert           string `json:"tls_cert"`
-	TLSKey            string `json:"tls_key"`
-	AllowInsecureHTTP bool   `json:"allow_insecure_http"`
+	TLSCert           string `json:"tls_cert,omitempty"`
+	TLSKey            string `json:"tls_key,omitempty"`
+	AllowInsecureHTTP bool   `json:"allow_insecure_http,omitempty"`
 }
 
 type DNSProxyConfig struct {
-	Listen          string   `json:"listen"`
-	Upstream        string   `json:"upstream"`
-	DoHURL          string   `json:"doh_url"`
-	TrustedSuffixes []string `json:"trusted_suffixes"`
-	ServicePrefixes []string `json:"service_prefixes"`
+	Listen          string   `json:"listen,omitempty"`
+	Upstream        string   `json:"upstream,omitempty"`
+	DoHURL          string   `json:"doh_url,omitempty"`
+	TrustedSuffixes []string `json:"trusted_suffixes,omitempty"`
+	ServicePrefixes []string `json:"service_prefixes,omitempty"`
 }
 
 type ApplyConfig struct {
 	Driver          string   `json:"driver"`
-	Interface       string   `json:"interface"`
-	InputInterface  string   `json:"input_interface"`
-	Peer            string   `json:"peer"`
-	BaseAllowed     []string `json:"base_allowed"`
-	NextHop         string   `json:"next_hop"`
-	SourceNet       string   `json:"source_net"`
-	WANInterface    string   `json:"wan_interface"`
-	Table           string   `json:"table"`
-	RulePriority    string   `json:"rule_priority"`
-	Mark            string   `json:"mark"`
-	Mask            string   `json:"mask"`
-	Chain           string   `json:"chain"`
-	PBRSection      string   `json:"pbr_section"`
-	FirewallSection string   `json:"firewall_section"`
+	Interface       string   `json:"interface,omitempty"`
+	InputInterface  string   `json:"input_interface,omitempty"`
+	Peer            string   `json:"peer,omitempty"`
+	BaseAllowed     []string `json:"base_allowed,omitempty"`
+	NextHop         string   `json:"next_hop,omitempty"`
+	SourceNet       string   `json:"source_net,omitempty"`
+	WANInterface    string   `json:"wan_interface,omitempty"`
+	Table           string   `json:"table,omitempty"`
+	RulePriority    string   `json:"rule_priority,omitempty"`
+	Mark            string   `json:"mark,omitempty"`
+	Mask            string   `json:"mask,omitempty"`
+	Chain           string   `json:"chain,omitempty"`
+	PBRSection      string   `json:"pbr_section,omitempty"`
+	FirewallSection string   `json:"firewall_section,omitempty"`
 }
 
 func LoadConfig(path string) (Config, error) {

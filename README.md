@@ -7,9 +7,7 @@ devices, and public exit servers.
 
 This project is not affiliated with or endorsed by Netflix.
 
-## Topologies
-
-### Nested WireGuard relay
+## Recommended topology
 
 ```text
 LAN device -> edge -> inner WireGuard -> exit router -> Internet
@@ -36,6 +34,45 @@ The example configs use `172.31.255.1/30` for the exit and
 in AllowedIPs, and configure the edge peer with `0.0.0.0/0` without installing
 an operating-system default route. An MTU around 1340 is a conservative
 starting point for WireGuard inside WireGuard.
+
+## Quick start
+
+WireGuard must already connect the edge and exit. On a build host, generate one
+bundle; the command creates matching random API tokens without printing them:
+
+```sh
+netflix-pbrd generate -topology nested \
+  -edge-peer 'EXIT_WIREGUARD_PUBLIC_KEY' \
+  -output netflix-pbrd-bundle
+```
+
+Transfer the matching binary and config to each host. Installation is one
+command per host and automatically detects systemd, OpenWrt, or Entware:
+
+```sh
+# On the OpenWrt exit:
+sudo ./netflix-pbrd-linux-arm64 install -config exit.json
+
+# On the Entware edge:
+sudo ./netflix-pbrd-linux-armv7 install -config edge.json
+```
+
+Configure LAN clients, DHCP, or a gateway redirect so both UDP and TCP DNS reach
+the generated edge `dns_proxy.listen` address.
+
+Verify the result on both hosts, then run the end-to-end test on the edge:
+
+```sh
+netflix-pbrd doctor
+netflix-pbrd status
+netflix-pbrd smoke-test
+```
+
+`smoke-test` resolves a trusted Netflix name through the configured DNS proxy,
+waits for synchronous apply/report, and shows the actual `ip route get` path of
+the learned address.
+
+## Advanced topologies
 
 ### Controller, transit relay, and edge
 
@@ -94,7 +131,7 @@ make build VERSION=v0.1.0
 
 Artifacts are written to `dist/`.
 
-## Configuration
+## Advanced configuration
 
 Choose and adapt one of the files in [`configs/`](configs/):
 
@@ -134,32 +171,36 @@ DNS-message POST requests with the original client in `X-Real-IP`. Add only the
 proxy address to AdGuard Home's `trusted_proxies`; AdGuard can then attribute
 query-log entries and client policies to the real device instead of the proxy.
 
-## Install
+## Operations
 
-On a regular Linux controller or public server:
+`doctor` checks the configured interface and peer, controller API, UDP/TCP DNS,
+owned nftables or iptables state, policy rule, learned route, and agent report
+progress. `status` reads the daemon's atomic runtime status file and includes
+the last apply/report times and last error.
 
 ```sh
-install -m 0755 dist/netflix-pbrd-linux-amd64 /usr/local/sbin/netflix-pbrd
-install -m 0600 configs/public-server.example.json /etc/netflix-pbrd.json
-install -m 0644 packaging/systemd/netflix-pbrd.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now netflix-pbrd
+netflix-pbrd doctor
+netflix-pbrd status
+netflix-pbrd smoke-test -name android.prod.cloud.netflix.com
 ```
 
-For an OpenWrt controller/exit, install the `arm64` binary as
-`/usr/sbin/netflix-pbrd`, copy the procd service from `packaging/openwrt/`, and
-enable it through `/etc/init.d`. A separate transit relay does not run the
-daemon. Adapt and run `configs/openwrt-relay-static.example.sh` once after its
-WireGuard network and WAN PBR interface exist. Its WAN firewall zone must have
-masquerading enabled. Apply this static relay policy before enabling the edge
-DNS proxy.
+Cleanup removes only tables, chains, policy rules, routes, WireGuard AllowedIPs
+and UCI values named by the loaded configuration. It never flushes a complete
+ruleset or the main route table:
 
-For Entware on an ARMv7 gateway, install the binary as
-`/opt/sbin/netflix-pbrd`, the configuration under `/opt/etc/`, and use the
-startup scripts in `packaging/entware/`. `S47wg-relay` is an example inner
-WireGuard interface setup. Copy `netflix-pbr-relay.conf.example` to
-`/opt/etc/netflix-pbr-relay.conf` and replace every placeholder. DNS redirection
-is deployment-specific and intentionally not managed by these scripts.
+```sh
+sudo netflix-pbrd cleanup
+sudo netflix-pbrd uninstall -yes
+sudo netflix-pbrd uninstall -yes -purge  # also removes config and state
+```
+
+Without `-purge`, uninstall preserves the configuration and learned state.
+Existing files replaced by `install` receive timestamped backups.
+
+A separate OpenWrt transit relay does not run the daemon. Adapt and run
+`configs/openwrt-relay-static.example.sh` once after its WireGuard network and
+WAN PBR interface exist. Its WAN firewall zone must have masquerading enabled.
+Apply this policy before enabling the edge DNS proxy.
 
 `linux-edge.input_interface` selects the incoming LAN interface and supports an
 iptables `+` suffix; it defaults to `br+`. `linux-edge.next_hop` is optional.
