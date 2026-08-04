@@ -24,8 +24,12 @@ Netflix routes, destination AllowedIPs, or a `netflix-pbrd` process. The exit
 router runs the controller and applies a fail-closed exit policy. The edge
 agent installs the learned Netflix marks on the inner WireGuard interface.
 If the exit's default route is not its desired WAN, configure one static source
-policy routing `source_net` to that WAN; `linux-exit` then restricts forwarding
-and NAT to learned Netflix destinations.
+policy routing `source_net` to that WAN; the exit driver then restricts
+forwarding and NAT to learned Netflix destinations.
+
+The nested OpenWrt example uses `nft-exit`, which owns a dedicated nftables
+table and atomically updates its destination set. Regular Linux exits can use
+the equivalent iptables-based `linux-exit` driver.
 
 The example configs use `172.31.255.1/30` for the exit and
 `172.31.255.2/30` for the edge. Configure the inner exit peer with the edge LAN

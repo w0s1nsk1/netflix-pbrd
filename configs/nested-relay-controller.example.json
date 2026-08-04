@@ -9,9 +9,9 @@
     "allow_insecure_http": true
   },
   "apply": [{
-    "driver": "linux-exit",
+    "driver": "nft-exit",
     "source_net": "192.168.8.0/24",
     "wan_interface": "wan",
-    "chain": "NETFLIX_EXIT"
+    "chain": "netflix_exit"
   }]
 }

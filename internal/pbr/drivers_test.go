@@ -123,3 +123,24 @@ func TestWGRouteAndOpenWrtDriversGenerateCommands(t *testing.T) {
 		t.Fatal(openwrt.commandLines())
 	}
 }
+
+func TestNFTExitCreatesFailClosedTableAndAtomicallyUpdatesSet(t *testing.T) {
+	runner := newFakeRunner()
+	runner.failures[commandKey("nft", "list", "table", "inet", "netflix_exit")] = 1
+	c := ApplyConfig{Driver: "nft-exit", SourceNet: "192.168.8.0/24", WANInterface: "wan", Chain: "netflix_exit"}
+	if err := applyNFTExit(runner, c, []string{"45.57.22.134/32"}); err != nil {
+		t.Fatal(err)
+	}
+	input := runner.inputs()
+	for _, required := range []string{
+		"ip saddr 192.168.8.0/24 ip daddr @destinations accept",
+		"ip saddr 192.168.8.0/24 drop",
+		"oifname \"wan\" masquerade",
+		"flush set inet netflix_exit destinations",
+		"add element inet netflix_exit destinations { 45.57.22.134/32 }",
+	} {
+		if !strings.Contains(input, required) {
+			t.Fatalf("missing %q in:\n%s", required, input)
+		}
+	}
+}

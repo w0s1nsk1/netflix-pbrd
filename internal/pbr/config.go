@@ -174,9 +174,9 @@ func LoadConfig(path string) (Config, error) {
 			if apply.PBRSection == "" || apply.FirewallSection == "" || !identifierPattern.MatchString(apply.PBRSection) || !identifierPattern.MatchString(apply.FirewallSection) {
 				return c, fmt.Errorf("openwrt-pbr requires pbr_section and firewall_section")
 			}
-		case "linux-exit":
+		case "linux-exit", "nft-exit":
 			if apply.SourceNet == "" || apply.WANInterface == "" {
-				return c, fmt.Errorf("linux-exit requires source_net and wan_interface")
+				return c, fmt.Errorf("%s requires source_net and wan_interface", apply.Driver)
 			}
 		default:
 			return c, fmt.Errorf("unsupported apply driver %q", apply.Driver)

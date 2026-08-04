@@ -15,9 +15,37 @@ func applyNetworks(runner CommandRunner, c ApplyConfig, nets []string) error {
 		return applyOpenWrt(runner, c, nets)
 	case "linux-exit":
 		return applyExit(runner, c, nets)
+	case "nft-exit":
+		return applyNFTExit(runner, c, nets)
 	default:
 		return fmt.Errorf("unknown driver %q", c.Driver)
 	}
+}
+
+func applyNFTExit(runner CommandRunner, c ApplyConfig, nets []string) error {
+	if c.Chain == "" {
+		c.Chain = "netflix_exit"
+	}
+	setName := "destinations"
+	if !succeeds(runner, "nft", "list", "table", "inet", c.Chain) {
+		var initial strings.Builder
+		initial.WriteString("add table inet " + c.Chain + "\n")
+		initial.WriteString("add set inet " + c.Chain + " " + setName + " { type ipv4_addr; flags interval; }\n")
+		initial.WriteString("add chain inet " + c.Chain + " forward { type filter hook forward priority -10; policy accept; }\n")
+		initial.WriteString("add rule inet " + c.Chain + " forward ip saddr " + c.SourceNet + " ip daddr @" + setName + " accept\n")
+		initial.WriteString("add rule inet " + c.Chain + " forward ip saddr " + c.SourceNet + " drop\n")
+		initial.WriteString("add chain inet " + c.Chain + " postrouting { type nat hook postrouting priority 100; policy accept; }\n")
+		initial.WriteString("add rule inet " + c.Chain + " postrouting ip saddr " + c.SourceNet + " ip daddr @" + setName + " oifname \"" + c.WANInterface + "\" masquerade\n")
+		if err := runner.RunInput(initial.String(), "nft", "-f", "-"); err != nil {
+			return err
+		}
+	}
+	var update strings.Builder
+	update.WriteString("flush set inet " + c.Chain + " " + setName + "\n")
+	if len(nets) > 0 {
+		update.WriteString("add element inet " + c.Chain + " " + setName + " { " + strings.Join(nets, ", ") + " }\n")
+	}
+	return runner.RunInput(update.String(), "nft", "-f", "-")
 }
 
 func succeeds(runner CommandRunner, name string, args ...string) bool {
