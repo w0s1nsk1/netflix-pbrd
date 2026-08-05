@@ -34,7 +34,7 @@ jobs:
           for package in dist/packages/*.deb; do dpkg-deb --info "$package" >/dev/null; done
           for package in dist/packages/*.ipk; do ar t "$package" | grep -q '^control.tar.gz$'; done
           docker run --rm -v "$PWD:/src" -w /src alpine:3.20 sh -ec \
-            'apk add --no-cache apk-tools >/dev/null; set -- dist/packages/*-x86_64.apk; apk add --allow-untrusted --root /tmp/apk-root --initdb "$1"; test -x /tmp/apk-root/usr/bin/netflix-pbrd; for package in dist/packages/*.apk; do gzip -t "$package"; done'
+            'apk add --no-cache apk-tools >/dev/null; set -- dist/packages/*-x86_64.apk; apk add --allow-untrusted --root /tmp/apk-root --initdb "$1"; test -x /tmp/apk-root/usr/sbin/netflix-pbrd; test -x /tmp/apk-root/etc/init.d/netflix-pbrd; for package in dist/packages/*.apk; do gzip -t "$package"; done'
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages

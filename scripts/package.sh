@@ -48,9 +48,9 @@ apk)
 	command -v abuild-tar >/dev/null 2>&1 || { echo "apk packaging requires abuild-tar" >&2; exit 1; }
 	control="$tmp/control"
 	data="$tmp/data"
-	mkdir -p "$control" "$data/usr/bin" "$data/etc/init.d"
-	cp "$binary" "$data/usr/bin/netflix-pbrd"
-	cp packaging/openrc/netflix-pbrd "$data/etc/init.d/netflix-pbrd"
+	mkdir -p "$control" "$data/usr/sbin" "$data/etc/init.d"
+	cp "$binary" "$data/usr/sbin/netflix-pbrd"
+	cp packaging/openwrt/netflix-pbrd.init "$data/etc/init.d/netflix-pbrd"
 	(
 		cd "$data"
 		find * -print0 | LC_ALL=C sort -z | tar --xattrs \
