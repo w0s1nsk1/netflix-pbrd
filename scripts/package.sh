@@ -7,6 +7,13 @@ binary=${3:?binary path}
 arch=${4:?package architecture}
 output=${5:?output directory}
 
+# Debian versions must begin with a digit. Keep tag versions unchanged and
+# make CI's SHA-only versions valid for all package formats.
+case "$version" in
+[0-9]*) :;;
+*) version="0.0.0~git.$version";;
+esac
+
 mkdir -p "$output"
 output=$(cd "$output" && pwd)
 tmp=$(mktemp -d)
@@ -51,8 +58,8 @@ EOF
 ipk)
 	control="$tmp/control"
 	data="$tmp/data"
-	mkdir -p "$control" "$data/usr/bin" "$data/etc/init.d"
-	cp "$binary" "$data/usr/bin/netflix-pbrd"
+	mkdir -p "$control" "$data/usr/sbin" "$data/etc/init.d"
+	cp "$binary" "$data/usr/sbin/netflix-pbrd"
 	cp packaging/openwrt/netflix-pbrd.init "$data/etc/init.d/netflix-pbrd"
 	cat >"$control/control" <<EOF
 Package: netflix-pbrd

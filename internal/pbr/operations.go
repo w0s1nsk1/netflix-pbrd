@@ -407,7 +407,7 @@ func cleanupProbe(runner CommandRunner, name string, args ...string) (bool, erro
 
 func runAllowMissing(runner CommandRunner, name string, args ...string) error {
 	err := runner.Run(name, args...)
-	if err != nil && !isMissingError(err) {
+	if err != nil && !isMissingError(err) && !(name == "uci" && len(args) > 1 && args[1] == "delete" && strings.Contains(strings.ToLower(err.Error()), "exit status 1")) {
 		return err
 	}
 	return nil

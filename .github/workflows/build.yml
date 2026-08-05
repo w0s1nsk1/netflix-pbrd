@@ -23,7 +23,7 @@ jobs:
       - run: sudo ./integration/nft-exit.sh ./dist/netflix-pbrd-linux-amd64
       - name: Build packages
         run: |
-          package_version="${GITHUB_SHA::12}"
+          package_version="0.0.0~git.${GITHUB_SHA::12}"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then package_version="${GITHUB_REF_NAME#v}"; fi
           make package VERSION="$package_version"
       - name: Validate package archives
