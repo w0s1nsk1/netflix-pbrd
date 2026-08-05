@@ -8,18 +8,19 @@ arch=${4:?package architecture}
 output=${5:?output directory}
 
 case "$format" in
-deb|apk)
+deb)
 	case "$version" in
 	[0-9]*) :;;
 	*) version="0.0.0~git.$version";;
 	esac
 	;;
+apk)
+	case "$version" in
+	*[._-]*) :;;
+	*) version="0.0.0_git~$version";;
+	esac
+	;;
 esac
-
-# Alpine versions use the underscore convention for local snapshots.
-if [ "$format" = apk ]; then
-	version=$(printf '%s' "$version" | sed 's/~/_/g')
-fi
 
 mkdir -p "$output"
 output=$(cd "$output" && pwd)
@@ -45,32 +46,20 @@ EOF
 	dpkg-deb --build --root-owner-group "$root" "$output/netflix-pbrd_${version}_${arch}.deb" >/dev/null
 	;;
 apk)
-	command -v abuild-tar >/dev/null 2>&1 || { echo "apk packaging requires abuild-tar" >&2; exit 1; }
-	control="$tmp/control"
 	data="$tmp/data"
-	mkdir -p "$control" "$data/usr/sbin" "$data/etc/init.d"
+	command -v apk >/dev/null 2>&1 || { echo "apk packaging requires apk-tools v3" >&2; exit 1; }
+	mkdir -p "$data/usr/sbin" "$data/etc/init.d"
 	cp "$binary" "$data/usr/sbin/netflix-pbrd"
 	cp packaging/openwrt/netflix-pbrd.init "$data/etc/init.d/netflix-pbrd"
-	(
-		cd "$data"
-		find * -print0 | LC_ALL=C sort -z | tar --xattrs \
-			--xattrs-exclude=security.selinux --format=posix \
-			--pax-option=exthdr.name=%d/PaxHeaders/%f,atime:=0,ctime:=0 \
-			--mtime="@0" --no-recursion --null -T - -cf -
-	) | abuild-tar --hash | gzip -n -9 >"$tmp/data.tar.gz"
-	cat >"$control/.PKGINFO" <<EOF
-pkgname = netflix-pbrd
-pkgver = $version
-arch = $arch
-size = $(wc -c <"$binary")
-origin = netflix-pbrd
-maintainer = netflix-pbrd contributors
-license = MIT
-description = DNS-learned Netflix policy-based routing daemon
-datahash = $(sha256sum "$tmp/data.tar.gz" | awk '{print $1}')
-EOF
-	tar -C "$control" --format=posix --pax-option=exthdr.name=%d/PaxHeaders/%f,atime:=0,ctime:=0 --mtime="@0" -cf - .PKGINFO | abuild-tar --cut | gzip -n -9 >"$tmp/control.tar.gz"
-	cat "$tmp/control.tar.gz" "$tmp/data.tar.gz" >"$output/netflix-pbrd-${version}-${arch}.apk"
+	apk mkpkg --files "$data" \
+		--info "name:netflix-pbrd" \
+		--info "version:$version" \
+		--info "arch:$arch" \
+		--info "origin:netflix-pbrd" \
+		--info "maintainer:netflix-pbrd contributors" \
+		--info "license:MIT" \
+		--info "description:DNS-learned Netflix policy-based routing daemon" \
+		--output "$output/netflix-pbrd-${version}-${arch}.apk"
 	;;
 ipk)
 	control="$tmp/control"
