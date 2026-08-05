@@ -23,11 +23,15 @@ jobs:
       - run: sudo ./integration/nft-exit.sh ./dist/netflix-pbrd-linux-amd64
       - name: Build packages
         run: |
-          package_version="0.0.0_git~${GITHUB_SHA::12}"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then package_version="${GITHUB_REF_NAME#v}"; fi
+          package_version="0.0.0~git.${GITHUB_SHA::12}"
+          apk_version="0.0.0_git~${GITHUB_SHA::12}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            package_version="${GITHUB_REF_NAME#v}"
+            apk_version="$package_version"
+          fi
           make package VERSION="$package_version"
           docker run --rm -v "$PWD:/src" -w /src alpine:edge sh -ec \
-            "apk add --no-cache apk-tools make >/dev/null && make package-apk VERSION='$package_version'"
+            "apk add --no-cache apk-tools make >/dev/null && make package-apk VERSION='$apk_version'"
       - name: Validate package archives
         run: |
           set -eu
