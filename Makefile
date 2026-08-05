@@ -28,8 +28,8 @@ package-ipk:
 package-apk:
 	@mkdir -p dist/packages
 	@VERSION='$(VERSION)' scripts/package.sh apk '$(VERSION)' dist/netflix-pbrd-linux-amd64 x86_64 dist/packages
-	@VERSION='$(VERSION)' scripts/package.sh apk '$(VERSION)' dist/netflix-pbrd-linux-arm64 aarch64 dist/packages
-	@VERSION='$(VERSION)' scripts/package.sh apk '$(VERSION)' dist/netflix-pbrd-linux-armv7 armv7 dist/packages
+	@VERSION='$(VERSION)' scripts/package.sh apk '$(VERSION)' dist/netflix-pbrd-linux-arm64 aarch64_cortex-a53 dist/packages
+	@VERSION='$(VERSION)' scripts/package.sh apk '$(VERSION)' dist/netflix-pbrd-linux-armv7 arm_cortex-a7_neon-vfpv4 dist/packages
 
 clean:
 	rm -rf dist
