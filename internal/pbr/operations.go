@@ -317,10 +317,10 @@ func Cleanup(config Config, runner CommandRunner) error {
 				return err
 			}
 		case "openwrt-pbr":
-			if err := runAllowMissing(runner, "uci", "-q", "delete", "pbr."+apply.PBRSection+".dest_addr"); err != nil {
+			if err := runAllowMissing(runner, "uci", "delete", "pbr."+apply.PBRSection+".dest_addr"); err != nil {
 				return err
 			}
-			if err := runAllowMissing(runner, "uci", "-q", "delete", "firewall."+apply.FirewallSection+".dest_ip"); err != nil {
+			if err := runAllowMissing(runner, "uci", "delete", "firewall."+apply.FirewallSection+".dest_ip"); err != nil {
 				return err
 			}
 			if err := runner.Run("uci", "commit", "pbr"); err != nil {
@@ -407,7 +407,7 @@ func cleanupProbe(runner CommandRunner, name string, args ...string) (bool, erro
 
 func runAllowMissing(runner CommandRunner, name string, args ...string) error {
 	err := runner.Run(name, args...)
-	if err != nil && !isMissingError(err) && !(name == "uci" && len(args) > 1 && args[1] == "delete" && strings.Contains(strings.ToLower(err.Error()), "exit status 1")) {
+	if err != nil && !isMissingError(err) {
 		return err
 	}
 	return nil

@@ -2,6 +2,7 @@ package pbr
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -170,6 +171,36 @@ func TestCleanupPropagatesOpenWrtReloadErrors(t *testing.T) {
 	config := Config{StateFile: state, Apply: []ApplyConfig{{Driver: "openwrt-pbr", PBRSection: "policy", FirewallSection: "rule"}}}
 	if err := Cleanup(config, runner); err == nil {
 		t.Fatal("expected OpenWrt reload failure")
+	}
+}
+
+type uciMissingRunner struct{ *fakeRunner }
+
+func (r uciMissingRunner) Run(name string, args ...string) error {
+	if name == "uci" && len(args) > 0 && args[0] == "delete" {
+		r.fakeRunner.record("", name, args...)
+		return fmt.Errorf("uci: Entry not found")
+	}
+	return r.fakeRunner.Run(name, args...)
+}
+
+func TestCleanupOpenWrtIsIdempotentWhenEntriesAreGone(t *testing.T) {
+	runner := uciMissingRunner{newFakeRunner()}
+	config := Config{StateFile: filepath.Join(t.TempDir(), "state"), Apply: []ApplyConfig{{Driver: "openwrt-pbr", PBRSection: "policy", FirewallSection: "rule"}}}
+	if err := Cleanup(config, runner); err != nil {
+		t.Fatal(err)
+	}
+	if err := Cleanup(config, runner); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCleanupOpenWrtPropagatesDeleteIOError(t *testing.T) {
+	runner := newFakeRunner()
+	runner.failures[commandKey("uci", "delete", "pbr.policy.dest_addr")] = 1
+	config := Config{StateFile: filepath.Join(t.TempDir(), "state"), Apply: []ApplyConfig{{Driver: "openwrt-pbr", PBRSection: "policy", FirewallSection: "rule"}}}
+	if err := Cleanup(config, runner); err == nil {
+		t.Fatal("expected UCI delete I/O error")
 	}
 }
 
