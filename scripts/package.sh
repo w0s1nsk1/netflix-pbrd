@@ -53,7 +53,7 @@ apk)
 	cp packaging/openrc/netflix-pbrd "$data/etc/init.d/netflix-pbrd"
 	(
 		cd "$data"
-		find . -mindepth 1 -print0 | LC_ALL=C sort -z | tar --xattrs \
+		find * -print0 | LC_ALL=C sort -z | tar --xattrs \
 			--xattrs-exclude=security.selinux --format=posix \
 			--pax-option=exthdr.name=%d/PaxHeaders/%f,atime:=0,ctime:=0 \
 			--mtime="@0" --no-recursion --null -T - -cf -
