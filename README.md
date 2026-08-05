@@ -7,11 +7,38 @@ devices, and public exit servers.
 
 This project is not affiliated with or endorsed by Netflix.
 
+## Contents
+
+- [Recommended topology](#recommended-topology)
+- [Quick start](#quick-start)
+- [Operations](#operations)
+- [Advanced topologies](#advanced-topologies)
+- [Configuration](#advanced-configuration)
+- [Build and packages](#build)
+
+## What it does
+
+`netflix-pbrd` is a DNS control-plane proxy. It learns destination addresses
+from application DNS answers, applies policy routing before returning those
+answers, and keeps the firewall state synchronized. It does not proxy or
+inspect Netflix content traffic.
+
 ## Recommended topology
 
-```text
-LAN device -> edge -> inner WireGuard -> exit router -> Internet
-                       (transported by an outer WireGuard hub)
+```mermaid
+flowchart LR
+    client[LAN device]
+    edge[Edge router<br/>DNS proxy + agent]
+    outer[Outer WireGuard hub<br/>transport only]
+    inner[Inner WireGuard]
+    exit[Exit router<br/>controller + nft-exit]
+    wan[Internet]
+
+    client --> edge
+    edge --> inner
+    inner -. encrypted transport .-> outer
+    outer -. encrypted transport .-> exit
+    exit --> wan
 ```
 
 This is the preferred three-host layout. The edge DNS proxy learns addresses
@@ -34,6 +61,25 @@ The example configs use `172.31.255.1/30` for the exit and
 in AllowedIPs, and configure the edge peer with `0.0.0.0/0` without installing
 an operating-system default route. An MTU around 1340 is a conservative
 starting point for WireGuard inside WireGuard.
+
+The DNS request path is synchronous: an address is not returned to the client
+until the route and exit policy acknowledge it.
+
+```mermaid
+sequenceDiagram
+    participant App as Netflix app
+    participant Edge as Edge DNS proxy
+    participant Upstream as Upstream DNS
+    participant Exit as Controller / exit
+
+    App->>Edge: DNS query
+    Edge->>Upstream: Forward query
+    Upstream-->>Edge: Answer + CNAMEs
+    Edge->>Edge: Validate Netflix names
+    Edge->>Exit: Report learned addresses
+    Exit-->>Edge: Apply/report acknowledged
+    Edge-->>App: DNS answer
+```
 
 ## Quick start
 
@@ -76,8 +122,12 @@ the learned address.
 
 ### Controller, transit relay, and edge
 
-```text
-LAN device -> edge router -> WireGuard controller -> relay router -> Internet
+```mermaid
+flowchart LR
+    client[LAN device] --> edge[Edge router<br/>DNS proxy + agent]
+    edge --> controller[WireGuard controller]
+    controller --> relay[OpenWrt relay<br/>static policy]
+    relay --> wan[Internet]
 ```
 
 The edge proxies DNS, learns trusted Netflix answers and CNAME targets, and
@@ -91,8 +141,11 @@ WAN policy can be ready before any DNS answer is returned.
 
 ### Client and public exit server
 
-```text
-LAN device -> WireGuard client -> public exit server -> Internet
+```mermaid
+flowchart LR
+    client[LAN device] --> edge[WireGuard client<br/>linux-edge]
+    edge --> exit[Public exit server<br/>controller + linux-exit]
+    exit --> wan[Internet]
 ```
 
 The public server combines the controller API and `linux-exit` driver. The
