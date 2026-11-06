@@ -1,3 +1,13 @@
 /dist/
 *.local.json
 *.state
+
+# local build/test artifacts (binaries, generated bundles, downloaded
+# packages used for one-off verification) — never meant to be committed
+/netflix-pbrd-linux-*
+/netflix-pbrd-patched-*
+/bundle/
+*.apk
+*.ipk
+*.patched-*
+sample.ipk
