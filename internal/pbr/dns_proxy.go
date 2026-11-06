@@ -3,6 +3,8 @@ package pbr
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -33,10 +35,11 @@ var defaultNetflixServicePrefixes = []string{
 }
 
 type dnsLearner struct {
-	config  DNSProxyConfig
-	learn   func(context.Context, []string) error
-	mu      sync.RWMutex
-	aliases map[string]struct{}
+	config    DNSProxyConfig
+	learn     func(context.Context, []string) error
+	mu        sync.RWMutex
+	aliases   map[string]struct{}
+	dohClient *http.Client
 }
 
 func newDNSLearner(config DNSProxyConfig, learn func(context.Context, []string) error) *dnsLearner {
@@ -46,7 +49,32 @@ func newDNSLearner(config DNSProxyConfig, learn func(context.Context, []string) 
 	if len(config.ServicePrefixes) == 0 {
 		config.ServicePrefixes = append([]string(nil), defaultNetflixServicePrefixes...)
 	}
-	return &dnsLearner{config: config, learn: learn, aliases: make(map[string]struct{})}
+	return &dnsLearner{config: config, learn: learn, aliases: make(map[string]struct{}), dohClient: buildDoHClient(config.DoHCAFile)}
+}
+
+// PATCH (local): build the http.Client used for DoH once, with the
+// system trust store plus (optionally) one extra PEM CA file so a
+// self-signed internal resolver doesn't need to be trusted system-wide.
+func buildDoHClient(caFile string) *http.Client {
+	client := &http.Client{Timeout: 5 * time.Second}
+	if caFile == "" {
+		return client
+	}
+	pem, err := ioutil.ReadFile(caFile)
+	if err != nil {
+		log.Printf("doh_ca_file %s: %v (falling back to system trust store)", caFile, err)
+		return client
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pem) {
+		log.Printf("doh_ca_file %s: no certificates found", caFile)
+		return client
+	}
+	client.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
+	return client
 }
 
 func (l *dnsLearner) ServeDNS(w dns.ResponseWriter, request *dns.Msg) {
@@ -104,7 +132,7 @@ func (l *dnsLearner) exchangeDoH(message *dns.Msg, remote net.Addr) (*dns.Msg, e
 			request.Header.Set("X-Real-IP", host)
 		}
 	}
-	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
+	response, err := l.dohClient.Do(request)
 	if err != nil {
 		return nil, err
 	}

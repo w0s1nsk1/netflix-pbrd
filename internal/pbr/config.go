@@ -42,9 +42,14 @@ type APIConfig struct {
 }
 
 type DNSProxyConfig struct {
-	Listen          string   `json:"listen,omitempty"`
-	Upstream        string   `json:"upstream,omitempty"`
-	DoHURL          string   `json:"doh_url,omitempty"`
+	Listen   string `json:"listen,omitempty"`
+	Upstream string `json:"upstream,omitempty"`
+	DoHURL   string `json:"doh_url,omitempty"`
+	// PATCH (local): path to a PEM file with one or more CA certificates
+	// trusted for DoHURL, in addition to the system trust store. Lets a
+	// self-signed/internal CA (e.g. a home AdGuard/Pi-hole) be trusted
+	// without installing it system-wide on the edge host.
+	DoHCAFile       string   `json:"doh_ca_file,omitempty"`
 	TrustedSuffixes []string `json:"trusted_suffixes,omitempty"`
 	ServicePrefixes []string `json:"service_prefixes,omitempty"`
 }

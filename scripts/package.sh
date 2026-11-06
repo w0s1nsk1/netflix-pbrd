@@ -79,7 +79,13 @@ EOF
 	printf '2.0\n' >"$tmp/debian-binary"
 	tar -C "$control" --format=ustar -czf "$tmp/control.tar.gz" control
 	tar -C "$data" --format=ustar -czf "$tmp/data.tar.gz" .
-	( cd "$tmp" && ar -cr "$output/netflix-pbrd_${version}_${arch}.ipk" debian-binary control.tar.gz data.tar.gz )
+	# PATCH (local): opkg's .ipk is a gzip-compressed tar of the three
+	# members (verified against a real feed .ipk: it is itself
+	# "gzip compressed data"), not an ar(1) archive and not an
+	# uncompressed tar. Using `ar` (upstream) produces a .deb; a bare
+	# `tar -cf` (first attempted fix here) still isn't gzipped and opkg
+	# rejects it too.
+	( cd "$tmp" && tar --format=ustar -czf "$output/netflix-pbrd_${version}_${arch}.ipk" debian-binary control.tar.gz data.tar.gz )
 	;;
 *)
 	echo "unknown package format: $format" >&2
