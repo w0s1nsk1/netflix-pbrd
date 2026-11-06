@@ -259,9 +259,13 @@ func applyWGRoute(runner CommandRunner, c ApplyConfig, nets []string) error {
 
 func applyEdge(runner CommandRunner, c ApplyConfig, nets []string) error {
 	withEdgeDefaults(&c)
-	if err := runner.Run("wg", "set", c.Interface, "peer", c.Peer, "allowed-ips", allowed(c, nets)); err != nil {
-		return err
-	}
+	// PATCH (local): do not let the agent mutate the WireGuard peer's
+	// AllowedIPs on every reconcile cycle. On a shared/production tunnel
+	// that list is hand-managed (see static AllowedIPs on the hub) and
+	// must not be clobbered by this tool's own routing state. Routing
+	// into the tunnel still works via ip rule + table <Table> below;
+	// the operator is responsible for ensuring the peer's AllowedIPs
+	// already covers the learned destinations (e.g. 0.0.0.0/0).
 	routeTarget := "dev " + c.Interface
 	if c.NextHop != "" {
 		routeTarget = "via " + c.NextHop + " " + routeTarget + " onlink"

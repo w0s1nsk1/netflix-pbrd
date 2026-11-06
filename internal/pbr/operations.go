@@ -168,7 +168,13 @@ func SmokeTest(config Config, runner CommandRunner, name string) (SmokeResult, e
 	}
 	request := new(dns.Msg)
 	request.SetQuestion(dns.Fqdn(name), dns.TypeA)
-	response, _, err := (&dns.Client{Net: "udp", Timeout: 10 * time.Second}).Exchange(request, config.DNSProxy.Listen)
+	// PATCH (local): advertise EDNS0 with a larger UDP buffer. Without this
+	// the client assumes the classic 512-byte UDP limit, and any reply
+	// larger than that (routine for responses with several A/AAAA records)
+	// comes back bigger than the receive buffer the library sized for the
+	// request, surfacing as "dns: buffer size too small".
+	request.SetEdns0(4096, false)
+	response, _, err := (&dns.Client{Net: "udp", Timeout: 10 * time.Second, UDPSize: 4096}).Exchange(request, config.DNSProxy.Listen)
 	if err != nil {
 		return result, err
 	}
