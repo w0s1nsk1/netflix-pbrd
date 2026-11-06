@@ -36,9 +36,15 @@ jobs:
         run: |
           set -eu
           for package in dist/packages/*.deb; do dpkg-deb --info "$package" >/dev/null; done
-          for package in dist/packages/*.ipk; do ar t "$package" | grep -q '^control.tar.gz$'; done
+          for package in dist/packages/*.ipk; do tar tzf "$package" | grep -q '^control.tar.gz$'; done
           docker run --rm -v "$PWD:/src" -w /src alpine:edge sh -ec \
             'apk add --no-cache apk-tools >/dev/null; set -- dist/packages/*-x86_64.apk; apk add --allow-untrusted --root /tmp/apk-root --initdb "$1"; test -x /tmp/apk-root/usr/sbin/netflix-pbrd; test -x /tmp/apk-root/etc/init.d/netflix-pbrd; for package in dist/packages/*.apk; do apk adbdump "$package" >/dev/null; done'
+          # Real opkg install, not just a structural check on the archive:
+          # the ar-based .ipk this project shipped before v0.1.1 passed a
+          # bare "does it contain control.tar.gz" test while still being
+          # byte-for-byte a .deb that real OpenWrt opkg refused to install.
+          docker run --rm -v "$PWD:/src" -w /src openwrt/rootfs:x86_64-openwrt-24.10 sh -ec \
+            'opkg install /src/dist/packages/netflix-pbrd_*_x86_64.ipk; test -x /usr/sbin/netflix-pbrd; test -x /etc/init.d/netflix-pbrd'
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages
