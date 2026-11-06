@@ -44,7 +44,7 @@ jobs:
           # bare "does it contain control.tar.gz" test while still being
           # byte-for-byte a .deb that real OpenWrt opkg refused to install.
           docker run --rm -v "$PWD:/src" -w /src openwrt/rootfs:x86_64-openwrt-24.10 sh -ec \
-            'opkg install /src/dist/packages/netflix-pbrd_*_x86_64.ipk; test -x /usr/sbin/netflix-pbrd; test -x /etc/init.d/netflix-pbrd'
+            'mkdir -p /var/lock; opkg install /src/dist/packages/netflix-pbrd_*_x86_64.ipk; test -x /usr/sbin/netflix-pbrd; test -x /etc/init.d/netflix-pbrd'
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages
